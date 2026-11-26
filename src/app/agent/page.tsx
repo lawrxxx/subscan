@@ -1,0 +1,192 @@
+"use client";
+import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
+import { useStore } from "@/lib/db/store";
+import { money } from "@/lib/format";
+import type { AppState } from "@/lib/types";
+import { Markdown } from "@/components/bits";
+
+interface Trace { name: string; input: Record<string, unknown>; result: unknown; error?: boolean }
+interface Turn { role: "user" | "assistant"; content: string; trace?: Trace[]; mode?: "claude" | "local"; error?: boolean }
+
+const PROMPTS = [
+  "Show me all my subscriptions",
+  "How much do I spend monthly?",
+  "Which subscription renews next?",
+  "Prepare my next international subscription payment",
+  "Identify subscriptions I might be wasting money on",
+  "What's in my wallet?",
+];
+
+const TOOL_LABEL: Record<string, string> = {
+  list_subscriptions: "Looked up subscriptions",
+  get_subscription: "Opened subscription",
+  spending_analysis: "Analysed spending",
+  upcoming_renewals: "Checked renewals",
+  find_waste: "Scanned for waste",
+  check_wallet_balance: "Read wallet balance on Celo",
+  prepare_payment: "Prepared payment draft",
+  transaction_status: "Checked transaction status",
+};
+
+// Only what the agent's tools need is sent; raw statement rows stay on device.
+function snapshot(state: AppState): AppState {
+  return { ...state, transactions: [], subscriptions: state.subscriptions.map((s) => ({ ...s, history: s.history.slice(-12) })) };
+}
+
+export default function Agent() {
+  const { state, ready } = useStore();
+  const [turns, setTurns] = useState<Turn[]>([]);
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const end = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    end.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [turns, busy]);
+
+  async function ask(q: string) {
+    const question = q.trim();
+    if (!question || busy) return;
+    const next: Turn[] = [...turns, { role: "user", content: question }];
+    setTurns(next);
+    setInput("");
+    setBusy(true);
+    try {
+      const r = await fetch("/api/agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: next.filter((t) => !t.error).map(({ role, content }) => ({ role, content })), state: snapshot(state) }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error ?? "Agent unavailable");
+      setTurns([...next, { role: "assistant", content: j.data.text, trace: j.data.trace, mode: j.data.mode }]);
+    } catch (e) {
+      setTurns([...next, { role: "assistant", content: e instanceof Error ? e.message : String(e), error: true }]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const lastMode = [...turns].reverse().find((t) => t.mode)?.mode;
+  const drafts = turns.flatMap((t) => t.trace ?? []).filter((t) => t.name === "prepare_payment" && !(t.result as { error?: string }).error);
+  const draft = drafts[drafts.length - 1]?.result as DraftResult | undefined;
+
+  if (ready && !state.subscriptions.length)
+    return (
+      <div className="px-4 py-16 sm:px-8 lg:px-12">
+        <div className="kicker mb-3">Agent</div>
+        <h1 className="display text-[46px]">Nothing to analyse yet.</h1>
+        <p className="mt-3 text-muted">The agent works from your imported subscriptions. <Link href="/onboarding" className="link">Import a statement</Link> first.</p>
+      </div>
+    );
+
+  return (
+    <div className="grid min-h-[calc(100dvh-1px)] xl:grid-cols-[1fr_360px]">
+      <section className="flex min-w-0 flex-col xl:border-r xl:rule">
+        <div className="border-b rule px-4 pt-8 pb-5 sm:px-8 lg:px-12">
+          <div className="kicker mb-2 flex items-center gap-3">
+            Agent workspace
+            {lastMode && <span className={`tag ${lastMode === "local" ? "border-amber/40 bg-amber-wash text-amber" : ""}`}>{lastMode === "claude" ? "Claude · tool use" : "Local intent mode · no LLM key"}</span>}
+          </div>
+          <h1 className="display text-[36px] sm:text-[44px]">Ask about your money.</h1>
+          <p className="mt-2 max-w-xl text-[14px] text-muted">Answers come from tools that read your subscriptions, live Celo balances and Textile FX quotes. The agent can prepare a payment; only you can approve it.</p>
+        </div>
+
+        <div className="flex-1 px-4 py-6 sm:px-8 lg:px-12">
+          {!turns.length && (
+            <div className="grid max-w-3xl gap-px border rule bg-rule sm:grid-cols-2">
+              {PROMPTS.map((p) => (
+                <button key={p} onClick={() => ask(p)} className="bg-paper px-4 py-4 text-left text-[15px] hover:bg-paper-2">
+                  <span className="display text-[19px]">“{p}”</span>
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="max-w-3xl space-y-8">
+            {turns.map((t, i) =>
+              t.role === "user" ? (
+                <div key={i} className="border-t border-ink pt-4">
+                  <div className="kicker mb-1">You asked</div>
+                  <div className="display text-[24px]">{t.content}</div>
+                </div>
+              ) : (
+                <div key={i}>
+                  {t.trace && t.trace.length > 0 && (
+                    <ul className="mb-3 space-y-1">
+                      {t.trace.map((tr, j) => (
+                        <li key={j} className="font-mono text-[11px] text-muted">
+                          <span className={tr.error ? "text-alert" : "text-accent"}>→</span> {TOOL_LABEL[tr.name] ?? tr.name}
+                          {Object.keys(tr.input).length > 0 && <span className="text-faint"> {JSON.stringify(tr.input)}</span>}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <div className={`text-[15px] leading-relaxed ${t.error ? "text-alert" : "text-ink"}`}>
+                    <Markdown text={t.content} />
+                  </div>
+                </div>
+              ),
+            )}
+            {busy && <div className="font-mono text-[12px] text-muted">→ working…</div>}
+            <div ref={end} />
+          </div>
+        </div>
+
+        <form
+          className="sticky bottom-[57px] border-t rule bg-paper px-4 py-4 sm:px-8 lg:bottom-0 lg:px-12"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void ask(input);
+          }}
+        >
+          <div className="flex max-w-3xl gap-2">
+            <input className="field h-11 flex-1 text-[15px]" placeholder="e.g. Which renewals hit before the 15th?" value={input} onChange={(e) => setInput(e.target.value)} disabled={busy} />
+            <button className="btn btn-primary h-11" disabled={busy || !input.trim()}>Ask</button>
+          </div>
+        </form>
+      </section>
+
+      <aside className="hidden px-8 py-8 xl:block">
+        <div className="kicker mb-4">Payment draft</div>
+        {draft ? <Draft d={draft} /> : <p className="text-[13px] text-muted">Ask the agent to prepare a payment. Drafts appear here for review — nothing is sent until you approve on the payment screen.</p>}
+        <div className="mt-10 border-t rule pt-6">
+          <div className="kicker mb-3">Tools available</div>
+          <ul className="space-y-1.5 text-[13px] text-ink-2">
+            {Object.values(TOOL_LABEL).map((l) => <li key={l}>{l}</li>)}
+          </ul>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+interface DraftResult {
+  review_url: string;
+  subscription: { name: string; amount: number; currency: string; next_renewal: string };
+  plan: { problems: string[]; needsConversion: boolean; sourceToken?: string; destinationToken?: string };
+  quote: { pay?: string; receive?: string; rate?: string; fee?: string; error?: string; reason?: string } | null;
+  balance: { available?: string; token?: string; sufficient?: boolean | null; error?: string } | null;
+}
+
+function Draft({ d }: { d: DraftResult }) {
+  return (
+    <div className="border border-ink">
+      <div className="border-b border-ink px-4 py-3">
+        <div className="display text-[22px]">{d.subscription.name}</div>
+        <div className="num text-[13px] text-muted">{money(d.subscription.amount, d.subscription.currency)} · due {d.subscription.next_renewal}</div>
+      </div>
+      <dl className="divide-y divide-rule px-4 text-[13px]">
+        <div className="flex justify-between py-2"><dt className="text-muted">Route</dt><dd>{d.plan.needsConversion ? `${d.plan.sourceToken} → ${d.plan.destinationToken}` : d.plan.destinationToken}</dd></div>
+        {d.quote?.pay && <div className="flex justify-between py-2"><dt className="text-muted">You pay</dt><dd className="num">{d.quote.pay}</dd></div>}
+        {d.quote?.rate && <div className="flex justify-between py-2"><dt className="text-muted">Rate</dt><dd className="num">{d.quote.rate}</dd></div>}
+        {(d.quote?.error || d.quote?.reason) && <div className="py-2 text-alert">{d.quote.error ?? d.quote.reason}</div>}
+        <div className="flex justify-between py-2"><dt className="text-muted">Balance</dt><dd className={`num ${d.balance?.sufficient === false ? "text-alert" : ""}`}>{d.balance?.available ? `${d.balance.available} ${d.balance.token}` : d.balance?.error}</dd></div>
+      </dl>
+      {d.plan.problems.length > 0 && <ul className="space-y-1 border-t rule px-4 py-3 text-[12px] text-alert">{d.plan.problems.map((p) => <li key={p}>{p}</li>)}</ul>}
+      <div className="border-t border-ink p-3">
+        <Link href={d.review_url} className="btn btn-primary w-full">Review &amp; approve</Link>
+      </div>
+    </div>
+  );
+}
