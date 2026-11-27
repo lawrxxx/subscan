@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { createPublicClient, http } from "viem";
 import { CHAIN, RPC_URL } from "@/lib/celo/config";
 import { indicativeUsdNgn } from "@/lib/textile/rate";
-import { supabaseConfigured } from "@/lib/supabase/env";
 
 export const dynamic = "force-dynamic";
 
@@ -14,9 +13,8 @@ export async function GET() {
       celoRpc: block.status === "fulfilled" ? { ok: true, block: block.value.toString() } : { ok: false, error: String(block.reason) },
       textile: fx.status === "fulfilled" ? { ok: true, ngnPerUsd: fx.value.ngnPerUsd, auth: process.env.TEXTILE_API_KEY ? "api-key" : "wallet-proof" } : { ok: false, error: String(fx.reason) },
       agent: { llm: !!(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN), model: process.env.SUBSCAN_AGENT_MODEL || "claude-opus-5-5" },
-      supabase: supabaseConfigured,
-      supabaseWebhooks: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
-      mono: !!process.env.MONO_SECRET_KEY && supabaseConfigured,
+      storage: "browser",
+      attribution: { app: "subscan", assigned: !!process.env.NEXT_PUBLIC_CELO_ATTRIBUTION_CODE },
       erc8004AgentId: process.env.ERC8004_AGENT_ID ?? null,
     },
   });

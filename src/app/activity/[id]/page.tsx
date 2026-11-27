@@ -1,7 +1,8 @@
 "use client";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { decodeAttribution } from "@/lib/celo/attribution";
 import { addressUrl, TOKENS } from "@/lib/celo/config";
 import { publicClient } from "@/lib/celo/wallet";
 import { useStore } from "@/lib/db/store";
@@ -40,6 +41,27 @@ export default function Receipt() {
       stop = true;
     };
   }, [p, upsertPayment]);
+
+  // Read each transaction back from Celo and decode its ERC-8021 attribution tag.
+  const [attr, setAttr] = useState<Record<string, string[] | null>>({});
+  const hashes = (p?.steps ?? []).map((s) => s.hash).filter(Boolean).join(",");
+  useEffect(() => {
+    if (!hashes) return;
+    let live = true;
+    Promise.all(
+      hashes.split(",").map(async (h) => {
+        try {
+          const tx = await publicClient.getTransaction({ hash: h as `0x${string}` });
+          return [h, decodeAttribution(tx.input)] as const;
+        } catch {
+          return [h, undefined] as const;
+        }
+      }),
+    ).then((rows) => live && setAttr(Object.fromEntries(rows.filter(([, v]) => v !== undefined)) as Record<string, string[] | null>));
+    return () => {
+      live = false;
+    };
+  }, [hashes]);
 
   if (!ready) return null;
   if (!p) return <Missing what="receipt" back="/activity" backLabel="All payments" />;
@@ -82,6 +104,12 @@ export default function Receipt() {
                   {s.at && <span className="num">{new Date(s.at).toLocaleTimeString("en-GB")}</span>}
                 </div>
                 {s.error && <div className="mt-1 text-[12px] text-alert">{s.error}</div>}
+                {s.hash && s.hash in attr && (
+                  <div className="mt-1 text-[11px] text-muted">
+                    Attribution (ERC-8021):{" "}
+                    {attr[s.hash] ? <span className="text-accent">{attr[s.hash]!.join(", ")} ✓</span> : <span>none{p.method === "x402" && s.kind === "settlement" ? " — submitted by the x402 facilitator" : ""}</span>}
+                  </div>
+                )}
               </li>
             ))}
           </ol>

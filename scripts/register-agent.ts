@@ -7,6 +7,7 @@
 import { createPublicClient, createWalletClient, http, parseEventLogs } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { CHAIN, ERC8004, ERC8004_IDENTITY_ABI, RPC_URL, TOKENS, txUrl } from "../src/lib/celo/config.ts";
+import { ATTRIBUTION_SUFFIX } from "../src/lib/celo/attribution.ts";
 
 const key = process.env.AGENT_OWNER_PRIVATE_KEY as `0x${string}` | undefined;
 const uri = process.env.AGENT_URI;
@@ -28,6 +29,7 @@ const { request } = await publicClient.simulateContract({
 });
 const hash = await walletClient.writeContract({
   ...request,
+  dataSuffix: ATTRIBUTION_SUFFIX, // ERC-8021 attribution
   ...(process.env.PAY_GAS_IN_USDT ? { feeCurrency: TOKENS.USDT.feeCurrencyAdapter } : {}),
 });
 console.log(`tx: ${txUrl(hash)}`);

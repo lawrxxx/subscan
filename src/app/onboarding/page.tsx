@@ -3,7 +3,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { Wordmark } from "@/components/shell";
-import { MonoConnect } from "@/components/mono-connect";
 import { parseTransactionsCsv, type ParseResult } from "@/lib/detection/csv";
 import { useStore } from "@/lib/db/store";
 import { sampleStatementCsv } from "@/lib/sample";
@@ -12,7 +11,7 @@ import { money } from "@/lib/format";
 
 export default function Onboarding() {
   const router = useRouter();
-  const { importTransactions, state, updateSettings, mode } = useStore();
+  const { importTransactions, state, updateSettings } = useStore();
   const [result, setResult] = useState<{ parse: ParseResult; subs: Subscription[]; source: "csv" | "sample"; file?: string } | null>(null);
   const [drag, setDrag] = useState(false);
   const input = useRef<HTMLInputElement>(null);
@@ -59,14 +58,10 @@ export default function Onboarding() {
           <div className="mt-12 max-w-md border-t rule pt-6">
             <div className="kicker mb-3">How your data is handled</div>
             <ul className="space-y-3 text-[14px] text-ink-2">
-              {mode === "account" ? (
-                <li className="grid grid-cols-[20px_1fr]"><span className="num text-faint">i.</span>Imported transactions and detected subscriptions are stored in your subscan account, protected so only you can read them.</li>
-              ) : (
-                <li className="grid grid-cols-[20px_1fr]"><span className="num text-faint">i.</span>Guest mode: the statement is parsed in this browser and stored only on this device.</li>
-              )}
-              <li className="grid grid-cols-[20px_1fr]"><span className="num text-faint">ii.</span>The agent reads your subscription summary to answer questions; conversations are logged to your account history.</li>
+              <li className="grid grid-cols-[20px_1fr]"><span className="num text-faint">i.</span>The statement is parsed in this browser and stored only on this device. Raw rows are never uploaded.</li>
+              <li className="grid grid-cols-[20px_1fr]"><span className="num text-faint">ii.</span>When you ask the agent a question, a summary of your detected subscriptions is sent to the server for that request only and is not stored.</li>
               <li className="grid grid-cols-[20px_1fr]"><span className="num text-faint">iii.</span>Payments are signed in your own wallet. subscan never holds keys or funds.</li>
-              <li className="grid grid-cols-[20px_1fr]"><span className="num text-faint">iv.</span>Clear everything at any time from Settings. Bank links are read-only.</li>
+              <li className="grid grid-cols-[20px_1fr]"><span className="num text-faint">iv.</span>Clear everything at any time from Settings.</li>
             </ul>
           </div>
         </section>
@@ -101,7 +96,10 @@ export default function Onboarding() {
                   <div className="text-[14px] font-medium">Try a sample statement</div>
                   <div className="mt-1 text-[13px] text-muted">12 months of made-up Lagos spending. Labelled as sample throughout.</div>
                 </button>
-                <MonoConnect />
+                <div className="px-6 py-5">
+                  <div className="text-[14px] font-medium text-muted">Bank account linking</div>
+                  <div className="mt-1 text-[13px] text-muted">Not part of this release. Export a CSV from your bank app or internet banking and upload it here.</div>
+                </div>
               </div>
               <button onClick={downloadSample} className="mt-4 text-[13px] text-muted link">Download the sample as CSV to see the expected format</button>
             </>

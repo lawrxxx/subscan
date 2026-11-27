@@ -1,6 +1,7 @@
 // Textile FX v2 RFQ client (server side). Endpoints and field names follow
 // https://docs.textilecredit.com/api/v2/rfq.html and /api/v2/authentication.html.
 // Base: https://api.textilecredit.com/v2 — preview, request, {id}/submit, {id}, {id}/cancel.
+import { ATTRIBUTION_CODES } from "../celo/attribution.ts";
 import { CHAIN_ID, TEXTILE, TOKENS, type TokenSymbol } from "../celo/config.ts";
 
 export interface TakerProof {
@@ -102,7 +103,14 @@ export function preview(b: RfqBody) {
 export function requestFirm(b: RfqBody, taker: `0x${string}`, takerProof?: TakerProof) {
   return call<FirmQuote>("/rfq/request", {
     method: "POST",
-    body: JSON.stringify({ ...body(b), taker, ...(takerProof && !process.env.TEXTILE_API_KEY ? { takerProof } : {}) }),
+    body: JSON.stringify({
+      ...body(b),
+      taker,
+      ...(takerProof && !process.env.TEXTILE_API_KEY ? { takerProof } : {}),
+      // Partner keys: Textile embeds our builder codes in its own ERC-8021 tag on
+      // transactions.swap.data. Keyless: the client appends subscan's tag instead.
+      ...(process.env.TEXTILE_API_KEY ? { includeAttribution: true, builderCodes: ATTRIBUTION_CODES.slice(0, 3) } : {}),
+    }),
   });
 }
 

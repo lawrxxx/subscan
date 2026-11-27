@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatUnits } from "viem";
 import type { PaymentRequired } from "@x402/core/types";
 import { addressUrl, TOKENS, type TokenSymbol } from "@/lib/celo/config";
+import { ATTRIBUTION_CODES } from "@/lib/celo/attribution";
 import { waitForReceipt } from "@/lib/celo/wallet";
 import { useStore } from "@/lib/db/store";
 import { Missing } from "@/components/empty";
@@ -261,6 +262,7 @@ export default function Pay() {
             ) : (
               <Row k="You pay" v={destAtomic && dstTok ? `${fmt(destAtomic, dstTok)} ${TOKENS[dstTok].display}` : "—"} strong note="No conversion needed" />
             )}
+            <Row k="Attribution" v={ATTRIBUTION_CODES.join(", ")} note={plan.method === "x402" ? "ERC-8021 tag on subscan-sent transactions. x402 settlements are submitted by the facilitator and are not tagged yet." : "ERC-8021 tag appended to each transaction's calldata"} />
             <Row k="Network fee" v={state.settings.payGasInUsdt ? "Paid in USD₮ (fee abstraction)" : "Paid in CELO"} note={w.balances ? `CELO balance ${Number(w.balances.CELO).toFixed(4)}` : undefined} />
           </div>
           <p className="mt-4 max-w-2xl text-[12px] text-muted">

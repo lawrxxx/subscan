@@ -12,6 +12,7 @@ import {
   type Hex,
   type WalletClient,
 } from "viem";
+import { tagCalldata } from "./attribution";
 import { CHAIN, CHAIN_ID, CHAIN_ID_HEX, RPC_URL, TOKENS, type TokenSymbol } from "./config";
 
 interface Eip1193 {
@@ -129,7 +130,8 @@ export async function sendTx(
     account,
     chain: CHAIN,
     to: tx.to,
-    data: tx.data,
+    // ERC-8021 attribution suffix on every subscan transaction (no-op if already tagged).
+    data: tagCalldata(tx.data),
     value: tx.value ?? 0n,
     ...(opts.payGasInUsdt ? { feeCurrency: TOKENS.USDT.feeCurrencyAdapter } : {}),
   };

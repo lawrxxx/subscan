@@ -2,6 +2,16 @@
 
 Subscription intelligence and payment agent on Celo mainnet. Import a statement → detect recurring payments → understand spend → let the agent prepare a payment → approve it in your wallet → settle on chain (Textile FX conversion USD₮ ↔ cNGN, then merchant settlement by direct transfer or x402).
 
+## Architecture
+
+Three components, no database:
+
+1. **Vercel** — hosts the Next.js app; server functions under `src/app/api/*` proxy Textile FX (keeping its key private), probe x402 endpoints and run the agent.
+2. **Textile FX** — live quotes and the actual USD₮ ↔ cNGN conversion on Celo.
+3. **Celo mainnet** — wallet connection, ERC-8004 agent identity, merchant settlement, verifiable transaction hashes. Every transaction carries an ERC-8021 attribution tag.
+
+Subscriptions, imported transactions, payment records and preferences live in the browser (`src/lib/db/storage.ts`). A server database can be added later by implementing the `StorageAdapter` interface.
+
 ## Run
 
 ```bash
@@ -10,16 +20,12 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Without Supabase variables the app runs in **guest mode** (data stays in the browser). With them, sign-in is required and all data is stored per user in Supabase with row-level security.
-
 Checks: `npm run typecheck`, `npm test`, `npm run build`.
 
-## Production setup (Supabase + Vercel)
+## Deploy (Vercel)
 
-1. **Supabase** → create a project → SQL editor → run `supabase/migrations/20261127000000_subscan_init.sql`.
-2. Supabase → Authentication → URL configuration: Site URL = your Vercel URL; add `https://<your-domain>/auth/callback` to Redirect URLs.
-3. **Vercel** → Project → Settings → Environment Variables (Production): `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and optionally `ANTHROPIC_API_KEY`, `MONO_SECRET_KEY`, `MONO_WEBHOOK_SECRET`. Redeploy.
-4. **Mono** (optional) → dashboard → webhook URL `https://<your-domain>/api/mono/webhook`, secret = `MONO_WEBHOOK_SECRET`.
+Import the repo in Vercel (framework: Next.js, defaults). In Settings → Environment Variables set, as needed:
+`NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_CELO_ATTRIBUTION_CODE` (your assigned hackathon code), `TEXTILE_API_KEY`, `ANTHROPIC_API_KEY`, `ERC8004_AGENT_ID`. Redeploy after changing `NEXT_PUBLIC_*` values.
 
 ## Layout
 
@@ -31,10 +37,8 @@ Checks: `npm run typecheck`, `npm test`, `npm run build`.
 | `src/lib/textile/` | Textile FX v2 RFQ client, TakerControl proof signing |
 | `src/lib/merchant/` | x402 probe/pay (official `@x402/*` packages) |
 | `src/lib/payments/` | Payment planning and step-by-step execution |
-| `src/lib/db/` | Client store (account/guest), zod schemas, Supabase repository |
-| `src/lib/supabase/` | Browser/server/admin clients; `src/middleware.ts` protects routes |
-| `src/lib/mono/` | Mono Connect: initiate, webhook, transaction sync |
-| `supabase/migrations/` | Schema + row-level security |
+| `src/lib/db/` | Store + `StorageAdapter` (browser localStorage) |
+| `src/lib/celo/attribution.ts` | ERC-8021 attribution tagging and decoding |
 | `scripts/register-agent.ts` | ERC-8004 Identity Registry registration |
 
 ## Verified integration constants (Celo, chain 42220)
