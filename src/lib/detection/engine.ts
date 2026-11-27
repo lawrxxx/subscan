@@ -209,6 +209,7 @@ export function detectSubscriptions(transactions: Transaction[], opts: DetectOpt
         status: "detected",
         priceChange,
         international: sample.currency !== home,
+        lapsed: stale,
       });
     });
   }

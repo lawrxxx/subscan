@@ -53,6 +53,7 @@ export interface Subscription {
   status: SubscriptionStatus;
   priceChange?: { from: number; to: number; date: string; pct: number };
   international: boolean; // billed in a currency other than the home currency
+  lapsed?: boolean; // no charge for more than ~2 billing periods — probably cancelled
   payment?: PaymentTarget;
   edited?: boolean;
 }

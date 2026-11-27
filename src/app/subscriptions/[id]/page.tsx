@@ -8,6 +8,7 @@ import { publicClient } from "@/lib/celo/wallet";
 import { monthlyEquivalent } from "@/lib/detection/analysis";
 import { addPeriod } from "@/lib/detection/engine";
 import { useStore } from "@/lib/db/store";
+import { Missing } from "@/components/empty";
 import { date, daysUntil, FREQ_LABEL, money, relDays } from "@/lib/format";
 import type { Frequency, PaymentTarget, Subscription } from "@/lib/types";
 import { Confidence, StatusTag } from "@/components/bits";
@@ -20,15 +21,17 @@ export default function SubscriptionDetail() {
   const [editing, setEditing] = useState(false);
 
   if (!ready) return null;
-  if (!s) return <div className="px-12 py-16"><p className="text-muted">Subscription not found.</p><Link href="/" className="link">Back</Link></div>;
+  if (!s) return <Missing what="subscription" back="/subscriptions" backLabel="All subscriptions" />;
 
   const max = Math.max(...s.history.map((h) => h.amount));
+  const min = Math.min(...s.history.map((h) => h.amount));
+  const barH = (a: number) => (max === min ? 55 : 30 + (70 * (a - min)) / (max - min));
   const dUntil = daysUntil(s.nextRenewal);
 
   return (
     <div>
       <div className="border-b rule px-4 py-4 text-[13px] sm:px-8 lg:px-12">
-        <Link href="/" className="text-muted link">Overview</Link> <span className="text-faint">/</span> {s.displayName}
+        <Link href="/subscriptions" className="text-muted link">Subscriptions</Link> <span className="text-faint">/</span> {s.displayName}
       </div>
 
       <section className="grid border-b rule lg:grid-cols-[1.3fr_1fr]">
@@ -52,9 +55,16 @@ export default function SubscriptionDetail() {
               </div>
             ))}
           </div>
-          <p className="mt-4 text-[13px] text-muted">
-            Renews {relDays(dUntil)} (estimated from a ~{s.intervalDays}-day billing interval). About {money(monthlyEquivalent(s) * 12, s.currency)} a year at the current price.
-          </p>
+          {s.lapsed && (
+            <p className="mt-4 border-l-2 border-amber bg-amber-wash/50 px-3 py-2 text-[13px] text-ink-2">
+              No charge since {date(s.lastCharge)} — this looks cancelled, so it&rsquo;s left out of your totals and renewals. Dismiss it if you&rsquo;ve stopped paying.
+            </p>
+          )}
+          {!s.lapsed && (
+            <p className="mt-4 text-[13px] text-muted">
+              Renews {relDays(dUntil)} (estimated from a ~{s.intervalDays}-day billing interval). About {money(monthlyEquivalent(s) * 12, s.currency)} a year at the current price.
+            </p>
+          )}
 
           <div className="mt-10 flex flex-wrap gap-3">
             {s.status !== "confirmed" && <button className="btn btn-primary" onClick={() => updateSubscription(s.id, { status: "confirmed" })}>Confirm subscription</button>}
@@ -71,12 +81,12 @@ export default function SubscriptionDetail() {
 
         <div className="px-4 py-10 sm:px-8 lg:px-10">
           <div className="kicker mb-4">Charge history</div>
-          <div className="flex h-[140px] items-end gap-[3px] border-b border-ink pb-px" role="img" aria-label="Charge amounts over time">
+          <div className="flex h-[140px] items-end gap-[5px] border-b border-ink pb-px" role="img" aria-label="Charge amounts over time">
             {s.history.map((h, i) => {
               const changed = i > 0 && h.amount !== s.history[i - 1].amount;
               return (
-                <div key={h.date} className="group relative flex-1" style={{ height: `${Math.max(8, (h.amount / max) * 100)}%` }}>
-                  <div className={`h-full ${changed ? "bg-alert" : "bg-ink/75"} group-hover:bg-accent`} />
+                <div key={h.date} className="group relative max-w-[28px] flex-1" style={{ height: `${barH(h.amount)}%` }}>
+                  <div className={`h-full ${changed ? "bg-alert" : "bg-ink/70"} group-hover:bg-accent`} />
                   <div className="pointer-events-none absolute bottom-full left-1/2 mb-1 hidden -translate-x-1/2 whitespace-nowrap bg-ink px-1.5 py-0.5 text-[11px] text-paper group-hover:block">
                     {date(h.date, "day")} · {money(h.amount, s.currency)}
                   </div>
@@ -84,7 +94,7 @@ export default function SubscriptionDetail() {
               );
             })}
           </div>
-          <div className="mt-1 flex justify-between text-[11px] text-muted num"><span>{date(s.firstSeen)}</span><span>{date(s.lastCharge)}</span></div>
+          <div className="mt-1 flex justify-between text-[11px] text-muted num"><span>{date(s.firstSeen)}</span><span>{max === min ? `Flat at ${money(max, s.currency)}` : `${money(min, s.currency)} – ${money(max, s.currency)}`}</span><span>{date(s.lastCharge)}</span></div>
           {s.priceChange && (
             <p className="mt-3 text-[13px]">
               <span className={s.priceChange.pct > 0 ? "text-alert" : "text-accent"}>{s.priceChange.pct > 0 ? "Price rose" : "Price fell"} {Math.abs(Math.round(s.priceChange.pct * 100))}%</span>{" "}
@@ -192,7 +202,7 @@ function PaymentMethod({ s, onSave }: { s: Subscription; onSave(p: PaymentTarget
   }
 
   return (
-    <section className="grid border-b rule lg:grid-cols-[1fr_1.3fr]">
+    <section id="settlement" className="grid scroll-mt-16 border-b rule lg:grid-cols-[1fr_1.3fr]">
       <div className="px-4 py-10 sm:px-8 lg:border-r lg:rule lg:px-12">
         <div className="kicker mb-3">Merchant settlement</div>
         <h2 className="display text-[30px]">How this merchant gets paid on Celo</h2>

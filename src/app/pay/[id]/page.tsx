@@ -7,6 +7,7 @@ import type { PaymentRequired } from "@x402/core/types";
 import { addressUrl, TOKENS, type TokenSymbol } from "@/lib/celo/config";
 import { waitForReceipt } from "@/lib/celo/wallet";
 import { useStore } from "@/lib/db/store";
+import { Missing } from "@/components/empty";
 import { date, money } from "@/lib/format";
 import { buildPaymentHeaders, describeRequirement, ensurePermit2Allowance } from "@/lib/merchant/x402-client";
 import { approveIfNeeded, executeSwap, fetchPreview, requestFirmQuote, transferToMerchant } from "@/lib/payments/execute";
@@ -16,7 +17,7 @@ import type { PaymentRecord, PaymentStep } from "@/lib/types";
 import { HashLink, TxStatus } from "@/components/bits";
 import { useWallet } from "@/components/wallet";
 
-const fmt = (atomic: string | bigint, t: TokenSymbol, dp = 4) =>
+const fmt = (atomic: string | bigint, t: TokenSymbol, dp = t === "cNGN" ? 2 : 4) =>
   Number(formatUnits(BigInt(atomic), TOKENS[t].decimals)).toLocaleString("en-US", { maximumFractionDigits: dp });
 
 export default function Pay() {
@@ -69,12 +70,13 @@ export default function Pay() {
   }, [loadPreview]);
 
   const [agree, setAgree] = useState(false);
+  const [draftSaved, setDraftSaved] = useState(false);
   const [record, setRecord] = useState<PaymentRecord | null>(null);
   const [running, setRunning] = useState(false);
   const [err, setErr] = useState<string>();
 
   if (!ready) return null;
-  if (!sub || !plan) return <div className="px-12 py-16 text-muted">Subscription not found. <Link href="/" className="link">Back</Link></div>;
+  if (!sub || !plan) return <Missing what="subscription" back="/subscriptions" backLabel="All subscriptions" />;
 
   const srcTok = plan.sourceToken!;
   const dstTok = plan.destinationToken;
@@ -91,6 +93,36 @@ export default function Pay() {
     ...(noLiquidity ? [`Textile FX has no live ${TOKENS[srcTok].display}→${dstTok} liquidity for this size right now (${preview?.reason}).`] : []),
   ];
   const canRun = !blockers.length && agree && !running && !!destAtomic && !!recipient && (!plan.needsConversion || preview?.status === "preview");
+
+  function saveDraft() {
+    if (!destAtomic || !dstTok || !sub || !plan) return;
+    upsertPayment({
+      id: `pay_${Date.now().toString(36)}`,
+      createdAt: new Date().toISOString(),
+      subscriptionId: sub.id,
+      merchant: sub.displayName,
+      sourceToken: srcTok,
+      destinationToken: dstTok,
+      sourceAmount: plan.needsConversion && preview?.takerPays ? fmt(preview.takerPays, srcTok) : fmt(destAtomic, dstTok),
+      destinationAmount: fmt(destAtomic, dstTok),
+      feeAmount: plan.needsConversion && preview?.feeAmount ? `${fmt(preview.feeAmount, srcTok)} ${TOKENS[srcTok].display} (indicative)` : undefined,
+      rate: rate ? `${rate} (indicative)` : undefined,
+      recipient,
+      method: plan.method ?? "address",
+      steps: [
+        ...(plan.needsConversion
+          ? [
+              { kind: "approval" as const, label: "Allow Textile FX to spend source token", status: "prepared" as const },
+              { kind: "conversion" as const, label: `Convert ${TOKENS[srcTok].display} → ${TOKENS[dstTok].display} via Textile FX`, status: "prepared" as const },
+            ]
+          : []),
+        { kind: "settlement" as const, label: plan.method === "x402" ? "Pay merchant via x402" : `Transfer ${TOKENS[dstTok].display} to merchant`, status: "prepared" as const },
+      ],
+      status: "prepared",
+      from: w.address,
+    });
+    setDraftSaved(true);
+  }
 
   async function run() {
     if (!w.address || !destAtomic || !recipient || !dstTok) return;
@@ -114,8 +146,8 @@ export default function Pay() {
       merchant: sub!.displayName,
       sourceToken: srcTok,
       destinationToken: dstTok,
-      sourceAmount: plan!.needsConversion && preview?.takerPays ? fmt(preview.takerPays, srcTok, 6) : fmt(destAtomic, dstTok, 6),
-      destinationAmount: fmt(destAtomic, dstTok, 6),
+      sourceAmount: plan!.needsConversion && preview?.takerPays ? fmt(preview.takerPays, srcTok) : fmt(destAtomic, dstTok),
+      destinationAmount: fmt(destAtomic, dstTok),
       recipient,
       method: plan!.method ?? "address",
       steps,
@@ -141,8 +173,8 @@ export default function Pay() {
         if (BigInt(quote.quote.buyAmount) < BigInt(destAtomic)) throw new Error("Firm quote delivers less than the merchant amount. Aborting.");
         save({
           rfqId: quote.rfqId,
-          sourceAmount: fmt(quote.quote.takerPays, srcTok, 6),
-          feeAmount: `${fmt(quote.quote.feeAmount, srcTok, 6)} ${TOKENS[srcTok].display}`,
+          sourceAmount: fmt(quote.quote.takerPays, srcTok),
+          feeAmount: `${fmt(quote.quote.feeAmount, srcTok)} ${TOKENS[srcTok].display}`,
           rate: formatRate(srcTok, dstTok, quote.quote.takerPays, quote.quote.buyAmount),
         });
         await approveIfNeeded(from, srcTok, quote, gas, cb);
@@ -186,7 +218,7 @@ export default function Pay() {
   return (
     <div>
       <div className="border-b rule px-4 py-4 text-[13px] sm:px-8 lg:px-12">
-        <Link href="/" className="text-muted link">Overview</Link> <span className="text-faint">/</span>{" "}
+        <Link href="/subscriptions" className="text-muted link">Subscriptions</Link> <span className="text-faint">/</span>{" "}
         <Link href={`/subscriptions/${encodeURIComponent(sub.id)}`} className="text-muted link">{sub.displayName}</Link> <span className="text-faint">/</span> Payment
       </div>
 
@@ -198,7 +230,7 @@ export default function Pay() {
 
           {/* Statement-style breakdown */}
           <div className="mt-10 max-w-2xl border-t-2 border-ink">
-            <Row k="Merchant receives" v={destAtomic && dstTok ? `${fmt(destAtomic, dstTok, 2)} ${TOKENS[dstTok].display}` : "—"} strong />
+            <Row k="Merchant receives" v={destAtomic && dstTok ? `${fmt(destAtomic, dstTok)} ${TOKENS[dstTok].display}` : "—"} strong />
             <Row
               k="Paid to"
               v={recipient ? <a href={addressUrl(recipient)} target="_blank" rel="noreferrer" className="font-mono text-[12px] link break-all">{recipient}</a> : <span className="text-alert">No verified recipient</span>}
@@ -222,12 +254,12 @@ export default function Pay() {
               <>
                 <Row k="Conversion" v={`${TOKENS[srcTok].display} → ${dstTok ? TOKENS[dstTok].display : ""} · Textile FX`} />
                 <Row k="Exchange rate" v={rate ? rate : previewErr ? <span className="text-alert">{previewErr}</span> : "Fetching…"} note="Indicative. The firm rate is locked when you approve and holds ~60 seconds." />
-                <Row k="Textile FX fee" v={preview?.feeAmount ? `${fmt(preview.feeAmount, srcTok, 6)} ${TOKENS[srcTok].display}` : "—"} note="Protocol taker fee, included in the amount you pay" />
-                <Row k="Converted amount received" v={receive && dstTok ? `${fmt(receive, dstTok, 2)} ${TOKENS[dstTok].display}` : "—"} />
-                <Row k="You pay" v={preview?.takerPays ? `${fmt(preview.takerPays, srcTok, 6)} ${TOKENS[srcTok].display}` : "—"} strong />
+                <Row k="Textile FX fee" v={preview?.feeAmount ? `${fmt(preview.feeAmount, srcTok)} ${TOKENS[srcTok].display}` : "—"} note="Protocol taker fee, included in the amount you pay" />
+                <Row k="Converted amount received" v={receive && dstTok ? `${fmt(receive, dstTok)} ${TOKENS[dstTok].display}` : "—"} />
+                <Row k="You pay" v={preview?.takerPays ? `${fmt(preview.takerPays, srcTok)} ${TOKENS[srcTok].display}` : "—"} strong />
               </>
             ) : (
-              <Row k="You pay" v={destAtomic && dstTok ? `${fmt(destAtomic, dstTok, 6)} ${TOKENS[dstTok].display}` : "—"} strong note="No conversion needed" />
+              <Row k="You pay" v={destAtomic && dstTok ? `${fmt(destAtomic, dstTok)} ${TOKENS[dstTok].display}` : "—"} strong note="No conversion needed" />
             )}
             <Row k="Network fee" v={state.settings.payGasInUsdt ? "Paid in USD₮ (fee abstraction)" : "Paid in CELO"} note={w.balances ? `CELO balance ${Number(w.balances.CELO).toFixed(4)}` : undefined} />
           </div>
@@ -265,6 +297,16 @@ export default function Pay() {
                 </>
               )}
               {w.error && <p className="mt-3 text-[12px] text-alert">{w.error}</p>}
+              {!w.hasProvider && !w.address && <p className="mt-3 text-[12px] text-muted">No browser wallet detected. Open subscan in MiniPay or a browser with MetaMask, Valora or Rabby.</p>}
+              {!recipient && (
+                <Link href={`/subscriptions/${encodeURIComponent(sub.id)}#settlement`} className="btn btn-ghost mt-3 w-full bg-paper">Add merchant payment details</Link>
+              )}
+              <div className="mt-8 border-t rule pt-5">
+                <div className="mb-1 text-[13px] font-medium">Not ready to pay?</div>
+                <p className="mb-3 text-[12px] text-muted">Save this as a prepared payment. Nothing is signed or broadcast; it appears in your history as Prepared.</p>
+                <button className="btn btn-ghost w-full bg-paper" disabled={!destAtomic || !dstTok || draftSaved} onClick={saveDraft}>{draftSaved ? "Saved to payments" : "Save as prepared payment"}</button>
+                {draftSaved && <Link href="/activity" className="mt-2 block text-center text-[12px] link">View in payments →</Link>}
+              </div>
             </>
           ) : (
             <Progress record={record} running={running} err={err} />

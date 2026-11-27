@@ -5,11 +5,12 @@ import { useEffect } from "react";
 import { addressUrl, TOKENS } from "@/lib/celo/config";
 import { publicClient } from "@/lib/celo/wallet";
 import { useStore } from "@/lib/db/store";
+import { Missing } from "@/components/empty";
 import { HashLink, TxStatus } from "@/components/bits";
 
 export default function Receipt() {
   const { id } = useParams<{ id: string }>();
-  const { state, upsertPayment } = useStore();
+  const { state, ready, upsertPayment } = useStore();
   const p = state.payments.find((x) => x.id === id);
 
   // Re-check pending hashes against the chain; never mark success without a receipt.
@@ -40,7 +41,8 @@ export default function Receipt() {
     };
   }, [p, upsertPayment]);
 
-  if (!p) return <div className="px-12 py-16 text-muted">Receipt not found. <Link href="/activity" className="link">All payments</Link></div>;
+  if (!ready) return null;
+  if (!p) return <Missing what="receipt" back="/activity" backLabel="All payments" />;
   const created = new Date(p.createdAt);
   return (
     <div className="px-4 py-10 sm:px-8 lg:px-12">
@@ -48,19 +50,19 @@ export default function Receipt() {
       <article className="mx-auto max-w-2xl border border-ink bg-[#faf8f3]">
         <header className="flex items-start justify-between border-b border-ink px-6 py-6 sm:px-8">
           <div>
-            <div className="kicker mb-2">Receipt · Celo mainnet</div>
+            <div className="kicker mb-2">{p.status === "prepared" ? "Prepared payment · not broadcast" : p.status === "confirmed" ? "Receipt · Celo mainnet" : "Payment · Celo mainnet"}</div>
             <h1 className="display text-[36px]">{p.merchant}</h1>
             <div className="mt-1 text-[13px] text-muted">{created.toLocaleString("en-GB", { dateStyle: "long", timeStyle: "short" })}</div>
           </div>
           <TxStatus status={p.status} />
         </header>
         <div className="px-6 py-6 sm:px-8">
-          <div className="kicker mb-1">Merchant received</div>
+          <div className="kicker mb-1">{p.status === "confirmed" ? "Merchant received" : "Merchant will receive"}</div>
           <div className="figure text-[64px]">{p.destinationAmount}<span className="ml-2 text-[0.35em] text-muted">{TOKENS[p.destinationToken].display}</span></div>
           <dl className="mt-6 border-t rule text-[14px]">
             {[
-              ["Paid from", `${p.sourceAmount} ${TOKENS[p.sourceToken].display}`],
-              ...(p.rate ? [["Rate (firm quote)", p.rate]] : []),
+              [p.status === "confirmed" ? "Paid from" : "Pays from", `${p.sourceAmount} ${TOKENS[p.sourceToken].display}`],
+              ...(p.rate ? [[p.status === "prepared" ? "Rate" : "Rate (firm quote)", p.rate]] : []),
               ...(p.feeAmount ? [["Textile FX fee", p.feeAmount]] : []),
               ["Method", p.method === "x402" ? "x402" : "Direct transfer"],
               ...(p.rfqId ? [["Textile RFQ", p.rfqId]] : []),
@@ -83,6 +85,12 @@ export default function Receipt() {
               </li>
             ))}
           </ol>
+          {p.status === "prepared" && (
+            <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-l-2 border-amber bg-amber-wash/50 px-4 py-3 text-[13px]">
+              <span>Nothing has been signed. Amounts are indicative until a firm quote is taken.</span>
+              <Link href={`/pay/${encodeURIComponent(p.subscriptionId)}`} className="btn btn-primary h-9">Continue to approval</Link>
+            </div>
+          )}
           <p className="mt-6 text-[11px] text-muted">Status is read from Celo mainnet receipts. Hashes link to Celoscan.</p>
         </div>
       </article>

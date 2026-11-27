@@ -5,6 +5,8 @@
 // records are additionally mirrored to Supabase when it is configured.
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { detectSubscriptions, mergeWithPrevious } from "../detection/engine";
+import { parseTransactionsCsv } from "../detection/csv";
+import { sampleStatementCsv } from "../sample";
 import type { AppSettings, AppState, PaymentRecord, Subscription, Transaction } from "../types";
 
 const KEY = "subscan:v1";
@@ -21,7 +23,13 @@ function load(): AppState {
     const raw = localStorage.getItem(KEY);
     if (!raw) return EMPTY;
     const parsed = JSON.parse(raw) as AppState;
-    return { ...EMPTY, ...parsed, settings: { ...EMPTY.settings, ...parsed.settings } };
+    // Recompute "lapsed" so stored detections age correctly between visits.
+    const now = Date.now();
+    const subscriptions = (parsed.subscriptions ?? []).map((s) => ({
+      ...s,
+      lapsed: (now - Date.parse(`${s.lastCharge}T00:00:00Z`)) / 86_400_000 > s.intervalDays * 2.2,
+    }));
+    return { ...EMPTY, ...parsed, subscriptions, settings: { ...EMPTY.settings, ...parsed.settings } };
   } catch {
     return EMPTY;
   }
@@ -47,9 +55,11 @@ interface Store {
   ready: boolean;
   state: AppState;
   importTransactions(txs: Transaction[], source: "csv" | "sample"): Subscription[];
+  loadSample(): Subscription[];
   updateSubscription(id: string, patch: Partial<Subscription>): void;
   updateSettings(patch: Partial<AppSettings>): void;
   upsertPayment(p: PaymentRecord): void;
+  removePayment(id: string): void;
   reset(): void;
 }
 
@@ -72,15 +82,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const store = useMemo<Store>(
-    () => ({
+  const store = useMemo<Store>(() => {
+    const importTransactions = (txs: Transaction[], source: "csv" | "sample") => {
+      const fresh = detectSubscriptions(txs, { homeCurrency: state.settings.homeCurrency });
+      const merged = mergeWithPrevious(fresh, state.dataSource === source ? state.subscriptions : []);
+      commit((s) => ({ ...s, transactions: txs, subscriptions: merged, importedAt: new Date().toISOString(), dataSource: source }));
+      return merged;
+    };
+    return {
       ready,
       state,
-      importTransactions(txs, source) {
-        const fresh = detectSubscriptions(txs, { homeCurrency: state.settings.homeCurrency });
-        const merged = mergeWithPrevious(fresh, state.dataSource === source ? state.subscriptions : []);
-        commit((s) => ({ ...s, transactions: txs, subscriptions: merged, importedAt: new Date().toISOString(), dataSource: source }));
-        return merged;
+      importTransactions,
+      loadSample() {
+        const { transactions } = parseTransactionsCsv(sampleStatementCsv(), state.settings.homeCurrency, "sample");
+        return importTransactions(transactions, "sample");
       },
       updateSubscription(id, patch) {
         commit((s) => ({ ...s, subscriptions: s.subscriptions.map((x) => (x.id === id ? { ...x, ...patch } : x)) }));
@@ -95,12 +110,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         });
         if (p.status !== "prepared") void mirrorPayment(p);
       },
+      removePayment(id) {
+        commit((s) => ({ ...s, payments: s.payments.filter((x) => x.id !== id || x.status !== "prepared") }));
+      },
       reset() {
         commit(() => ({ ...EMPTY, settings: state.settings }));
       },
-    }),
-    [ready, state, commit],
-  );
+    };
+  }, [ready, state, commit]);
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;
 }

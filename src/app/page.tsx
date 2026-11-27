@@ -1,20 +1,19 @@
 "use client";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { duplicates, monthlyEquivalent, priceChanges, spendSummary, toHome, upcomingRenewals } from "@/lib/detection/analysis";
 import { useRates, useStore } from "@/lib/db/store";
 import { date, FREQ_LABEL, money, moneyParts, PER, relDays } from "@/lib/format";
-import type { Subscription } from "@/lib/types";
-import { Confidence, StatusTag } from "@/components/bits";
+import { Confidence, TxStatus } from "@/components/bits";
+import { NoData } from "@/components/empty";
+import { TOKENS } from "@/lib/celo/config";
 
-type Filter = "all" | "review" | "confirmed" | "dismissed";
 
 export default function Overview() {
   const { state, ready, updateSubscription } = useStore();
   const home = state.settings.homeCurrency;
   const { rates, asOf, error: rateError } = useRates(home);
   const today = new Date().toISOString().slice(0, 10);
-  const [filter, setFilter] = useState<Filter>("all");
 
   const subs = state.subscriptions;
   const summary = useMemo(() => spendSummary(subs, home, rates), [subs, home, rates]);
@@ -24,11 +23,16 @@ export default function Overview() {
   const reviewCount = subs.filter((s) => s.status === "detected").length;
 
   if (!ready) return <div className="px-12 py-16 text-muted">Loading…</div>;
-  if (!subs.length) return <Empty />;
+  if (!subs.length) return <NoData kicker="Overview" title="Every recurring charge, accounted for." />;
 
-  const list = subs
-    .filter((s) => (filter === "all" ? s.status !== "dismissed" : filter === "review" ? s.status === "detected" : s.status === filter))
-    .sort((a, b) => a.nextRenewal.localeCompare(b.nextRenewal));
+  const lapsed = subs.filter((s) => s.status !== "dismissed" && s.lapsed);
+  const biggest = subs
+    .filter((s) => s.status !== "dismissed" && !s.lapsed)
+    .map((s) => ({ s, yearly: toHome(monthlyEquivalent(s) * 12, s.currency, home, rates) }))
+    .sort((a, b) => (b.yearly ?? 0) - (a.yearly ?? 0))
+    .slice(0, 6);
+  const maxYearly = biggest[0]?.yearly ?? 1;
+  const recent = state.payments.slice(0, 3);
 
   const headline = summary.monthlyHome ?? summary.byCurrency[0]?.monthly ?? 0;
   const headlineCcy = summary.monthlyHome !== null ? home : summary.byCurrency[0]?.currency ?? home;
@@ -130,24 +134,60 @@ export default function Overview() {
       {/* Ledger + notes */}
       <section className="grid xl:grid-cols-[1fr_320px]">
         <div className="px-4 py-8 sm:px-8 lg:px-12 xl:border-r xl:rule">
-          <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
-            <h2 className="display text-[30px]">Ledger</h2>
-            <div className="flex gap-px text-[13px]" role="tablist">
-              {(
-                [
-                  ["all", "Active"],
-                  ["review", `Needs review${reviewCount ? ` (${reviewCount})` : ""}`],
-                  ["confirmed", "Confirmed"],
-                  ["dismissed", "Dismissed"],
-                ] as [Filter, string][]
-              ).map(([k, l]) => (
-                <button key={k} role="tab" aria-selected={filter === k} onClick={() => setFilter(k)} className={`border-b-2 px-2.5 py-1.5 ${filter === k ? "border-ink text-ink" : "border-transparent text-muted hover:text-ink"}`}>
-                  {l}
-                </button>
-              ))}
-            </div>
+          {reviewCount > 0 && (
+            <Link href="/subscriptions" className="mb-8 flex items-center justify-between gap-4 border border-amber/40 bg-amber-wash/60 px-4 py-3 text-[14px] hover:border-amber">
+              <span><span className="num font-medium">{reviewCount}</span> detected subscriptions are waiting for you to confirm or dismiss.</span>
+              <span className="whitespace-nowrap text-[13px] text-amber">Review →</span>
+            </Link>
+          )}
+          <div className="mb-3 flex flex-wrap items-end justify-between gap-x-3 gap-y-1">
+            <h2 className="display text-[30px]">Biggest commitments</h2>
+            <Link href="/subscriptions" className="text-[13px] text-muted link">All {summary.activeCount} subscriptions →</Link>
           </div>
-          <Ledger list={list} home={home} rates={rates} onStatus={(id, status) => updateSubscription(id, { status })} />
+          <ol className="border-t border-ink">
+            {biggest.map(({ s, yearly }, i) => (
+              <li key={s.id}>
+                <Link href={`/subscriptions/${encodeURIComponent(s.id)}`} className="group grid grid-cols-[28px_1fr_auto] items-center gap-x-4 border-b rule py-3.5 hover:bg-paper-2/50 sm:grid-cols-[28px_1.2fr_1fr_120px]">
+                  <span className="num text-[12px] text-faint">{String(i + 1).padStart(2, "0")}</span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-[15px] font-medium group-hover:underline">{s.displayName}</span>
+                    <span className="text-[12px] text-muted">{money(s.amount, s.currency)} {FREQ_LABEL[s.frequency].toLowerCase()} · next {date(s.nextRenewal, "day")}</span>
+                  </span>
+                  <span className="hidden h-[5px] bg-stone sm:block" aria-hidden>
+                    <span className="block h-full bg-ink/70" style={{ width: `${((yearly ?? 0) / (maxYearly || 1)) * 100}%` }} />
+                  </span>
+                  <span className="text-right">
+                    <span className="num block text-[15px]">{yearly === null ? "—" : money(yearly, home)}</span>
+                    <span className="text-[11px] text-muted">per year</span>
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ol>
+
+          <div className="mt-12 mb-3 flex items-end justify-between gap-3">
+            <h2 className="display text-[30px]">Recent payments</h2>
+            <Link href="/activity" className="text-[13px] text-muted link">History →</Link>
+          </div>
+          {recent.length ? (
+            <ul className="border-t border-ink">
+              {recent.map((p) => (
+                <li key={p.id}>
+                  <Link href={`/activity/${p.id}`} className="flex items-center justify-between gap-4 border-b rule py-3 hover:bg-paper-2/50">
+                    <span>
+                      <span className="block text-[15px] font-medium">{p.merchant}</span>
+                      <span className="num text-[12px] text-muted">{p.destinationAmount} {TOKENS[p.destinationToken].display} · {date(p.createdAt.slice(0, 10))}</span>
+                    </span>
+                    <TxStatus status={p.status} />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="border-t border-ink pt-4 text-[14px] text-muted">
+              No payments yet. Add a merchant&rsquo;s Celo payment details on a subscription, then <Link href={next ? `/pay/${encodeURIComponent(next.id)}` : "/subscriptions"} className="link">prepare a payment</Link>.
+            </p>
+          )}
         </div>
 
         <aside className="border-t rule px-4 py-8 sm:px-8 lg:px-12 xl:border-t-0 xl:px-8">
@@ -164,6 +204,16 @@ export default function Overview() {
                 </Link>
               ))}
             </Note>
+            {lapsed.length > 0 && (
+              <Note title="Possibly cancelled" empty="">
+                {lapsed.map((s) => (
+                  <Link key={s.id} href={`/subscriptions/${encodeURIComponent(s.id)}`} className="block border-t rule py-3 first:border-t-0 first:pt-0">
+                    <div className="text-[14px] font-medium">{s.displayName}</div>
+                    <div className="num text-[12px] text-muted">Last charged {date(s.lastCharge)} · left out of your totals</div>
+                  </Link>
+                ))}
+              </Note>
+            )}
             <Note title="Possible overlaps" empty="No duplicate or overlapping services.">
               {dupes.map((g) => (
                 <div key={g.reason} className="border-t rule py-3 first:border-t-0 first:pt-0">
@@ -205,70 +255,6 @@ function Note({ title, empty, children }: { title: string; empty: string; childr
     <div>
       <h3 className="display mb-3 text-[19px]">{title}</h3>
       {has ? children : <p className="text-[13px] text-muted">{empty}</p>}
-    </div>
-  );
-}
-
-function Ledger({ list, home, rates, onStatus }: { list: Subscription[]; home: string; rates: Record<string, number>; onStatus(id: string, s: Subscription["status"]): void }) {
-  if (!list.length) return <p className="border-t rule py-8 text-[14px] text-muted">Nothing here.</p>;
-  return (
-    <div className="border-t border-ink">
-      <div className="hidden grid-cols-[1.6fr_0.8fr_0.9fr_0.9fr_0.9fr_0.7fr_150px] gap-4 border-b rule py-2 text-[11px] uppercase tracking-[0.1em] text-muted md:grid">
-        <span>Merchant</span>
-        <span>Cadence</span>
-        <span>Next renewal</span>
-        <span className="text-right">Amount</span>
-        <span className="text-right">Per year ({home})</span>
-        <span>Confidence</span>
-        <span className="text-right">Status</span>
-      </div>
-      <ul>
-        {list.map((s) => {
-          const yearly = toHome(monthlyEquivalent(s) * 12, s.currency, home, rates);
-          return (
-            <li key={s.id} className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 border-b rule py-3.5 md:grid-cols-[1.6fr_0.8fr_0.9fr_0.9fr_0.9fr_0.7fr_150px] md:items-center">
-              <Link href={`/subscriptions/${encodeURIComponent(s.id)}`} className="min-w-0">
-                <div className="truncate text-[15px] font-medium hover:underline">{s.displayName}</div>
-                <div className="text-[12px] text-muted">
-                  {s.category}
-                  {s.international && <> · <span className="text-ink-2">{s.currency}</span></>}
-                  {s.priceChange && s.priceChange.pct > 0 && <> · <span className="text-alert">price up</span></>}
-                </div>
-              </Link>
-              <div className="num text-right text-[15px] md:hidden">{money(s.amount, s.currency)}<span className="text-muted">{PER[s.frequency]}</span></div>
-              <span className="hidden text-[13px] md:block">{FREQ_LABEL[s.frequency]}</span>
-              <span className="num text-[12px] text-muted md:text-[13px] md:text-ink">{date(s.nextRenewal)}</span>
-              <span className="num hidden text-right text-[14px] md:block">{money(s.amount, s.currency)}</span>
-              <span className="num hidden text-right text-[13px] text-muted md:block">{yearly === null ? "—" : money(yearly, home)}</span>
-              <span className="hidden md:block"><Confidence value={s.confidence} /></span>
-              <div className="col-span-2 flex items-center justify-start gap-2 md:col-span-1 md:justify-end">
-                {s.status === "detected" ? (
-                  <>
-                    <button onClick={() => onStatus(s.id, "confirmed")} className="tag hover:border-accent hover:text-accent">Confirm</button>
-                    <button onClick={() => onStatus(s.id, "dismissed")} className="tag hover:border-alert hover:text-alert">Dismiss</button>
-                  </>
-                ) : (
-                  <>
-                    <StatusTag status={s.status} />
-                    <button onClick={() => onStatus(s.id, "detected")} className="text-[11px] text-muted link">undo</button>
-                  </>
-                )}
-              </div>
-            </li>
-          );
-        })}
-      </ul>
-    </div>
-  );
-}
-
-function Empty() {
-  return (
-    <div className="px-4 py-16 sm:px-8 lg:px-12 lg:py-24">
-      <div className="kicker mb-4">Overview</div>
-      <h1 className="display max-w-2xl text-[46px] sm:text-[64px]">No statement yet.</h1>
-      <p className="mt-4 max-w-md text-[16px] text-muted">Import a CSV from your bank or card and subscan will find the payments that repeat.</p>
-      <Link href="/onboarding" className="btn btn-primary mt-8">Import a statement</Link>
     </div>
   );
 }

@@ -27,6 +27,7 @@ Ground rules:
 - You cannot move money. prepare_payment builds a draft with a live indicative Textile FX quote; the user reviews and approves every on-chain transaction on the review screen. Say this plainly when you prepare a payment and give the review link from the tool result as a markdown link.
 - If a subscription has no verified merchant payment method, explain that the user must add the merchant's Celo receiving address or x402 endpoint on the subscription page. Never invent addresses.
 - Waste flags are suggestions for the user to judge, not conclusions.
+- To confirm, dismiss or restore subscriptions use propose_subscription_changes. It only proposes: tell the user to press Apply below your answer.
 - Write concisely: short paragraphs or tight lists, amounts with currency codes, no filler. Use markdown sparingly.`;
 
 export async function runClaude(history: ChatTurn[], ctx: ToolContext): Promise<AgentReply> {
@@ -102,6 +103,15 @@ export async function runLocal(message: string, ctx: ToolContext): Promise<Agent
     return result as Record<string, any>;
   };
 
+  const action = /\b(dismiss|remove|hide)\b/.test(m) ? "dismiss" : /\b(confirm|approve|mark)\b/.test(m) && !/pay/.test(m) ? "confirm" : /\b(restore|undo)\b/.test(m) ? "restore" : null;
+  if (action) {
+    const named = ctx.state.subscriptions.filter((s) => m.includes(s.displayName.toLowerCase()) || m.includes(s.merchant));
+    const refs = named.length ? named.map((s) => s.id) : /(all|everything|high|confident)/.test(m) ? ["high_confidence"] : [];
+    if (!refs.length) return { text: `Which subscription should I ${action}? Name it, or say "${action} all high-confidence ones".`, trace, mode: "local" };
+    const r = await call("propose_subscription_changes", { action, refs });
+    if (!r.changes.length) return { text: "Nothing to change — those are already in that state.", trace, mode: "local" };
+    return { text: `Ready to ${action} ${r.changes.length} subscription${r.changes.length > 1 ? "s" : ""}. Check the list below and press **${action[0].toUpperCase() + action.slice(1)}** to apply it — nothing changes until you do.`, trace, mode: "local" };
+  }
   if (/(prepare|pay|settle)/.test(m)) {
     const intl = /international|foreign|usd|dollar/.test(m);
     const named = ctx.state.subscriptions.find((s) => m.includes(s.displayName.toLowerCase()));

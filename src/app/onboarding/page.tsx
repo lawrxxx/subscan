@@ -62,7 +62,7 @@ export default function Onboarding() {
               <li className="grid grid-cols-[20px_1fr]"><span className="num text-faint">i.</span>The statement is parsed in this browser. Raw rows are stored only on this device (local storage) and are never uploaded.</li>
               <li className="grid grid-cols-[20px_1fr]"><span className="num text-faint">ii.</span>When you ask the agent a question, a summary of your detected subscriptions is sent to the server for that request only.</li>
               <li className="grid grid-cols-[20px_1fr]"><span className="num text-faint">iii.</span>Payments are signed in your own wallet. subscan never holds keys or funds.</li>
-              <li className="grid grid-cols-[20px_1fr]"><span className="num text-faint">iv.</span>Clear everything at any time from Wallet &amp; settings.</li>
+              <li className="grid grid-cols-[20px_1fr]"><span className="num text-faint">iv.</span>Clear everything at any time from Settings.</li>
             </ul>
           </div>
         </section>

@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { parseEventLogs, encodeFunctionData } from "viem";
 import { addressUrl, CHAIN_ID, ERC8004, ERC8004_IDENTITY_ABI, TEXTILE, TOKENS } from "@/lib/celo/config";
@@ -19,10 +20,9 @@ interface Status {
 
 export default function WalletPage() {
   const w = useWallet();
-  const { state, updateSettings, reset } = useStore();
+  const { state, updateSettings } = useStore();
   const [status, setStatus] = useState<Status | null>(null);
   const [reg, setReg] = useState<{ busy?: boolean; hash?: `0x${string}`; error?: string }>({});
-  const [confirmReset, setConfirmReset] = useState(false);
 
   useEffect(() => {
     fetch("/api/status").then((r) => r.json()).then((j) => setStatus(j.data)).catch(() => {});
@@ -50,7 +50,7 @@ export default function WalletPage() {
 
   return (
     <div>
-      <PageHeader kicker="Wallet & settings" title="Wallet, network and data" />
+      <PageHeader kicker="Wallet" title={<>Your wallet on <span className="italic">Celo</span></>}>Balances are read live from Celo mainnet. subscan never holds keys or funds.</PageHeader>
 
       <section className="grid border-b rule lg:grid-cols-[1.2fr_1fr]">
         <div className="px-4 py-10 sm:px-8 lg:border-r lg:rule lg:px-12">
@@ -88,21 +88,6 @@ export default function WalletPage() {
           )}
           {w.error && <p className="mt-3 text-[13px] text-alert">{w.error}</p>}
 
-          <div className="mt-10 border-t rule pt-6">
-            <label className="flex items-start gap-3 text-[14px]">
-              <input type="checkbox" className="mt-1 accent-[var(--color-accent)]" checked={state.settings.payGasInUsdt} onChange={(e) => updateSettings({ payGasInUsdt: e.target.checked })} />
-              <span>
-                Pay network fees in USD₮
-                <span className="block text-[12px] text-muted">Uses Celo fee abstraction (CIP-64 adapter {TOKENS.USDT.feeCurrencyAdapter?.slice(0, 10)}…). Supported by MiniPay; some wallets ignore it and charge CELO.</span>
-              </span>
-            </label>
-            <label className="mt-5 block text-[12px] text-muted">Home currency
-              <select className="field mt-1 block max-w-[220px] text-ink" value={state.settings.homeCurrency} onChange={(e) => updateSettings({ homeCurrency: e.target.value })}>
-                <option value="NGN">NGN</option>
-                <option value="USD">USD</option>
-              </select>
-            </label>
-          </div>
         </div>
 
         <div className="bg-paper-2/60 px-4 py-10 sm:px-8 lg:px-10">
@@ -131,47 +116,23 @@ export default function WalletPage() {
         </div>
       </section>
 
-      <section className="grid lg:grid-cols-[1.2fr_1fr]">
-        <div className="px-4 py-10 sm:px-8 lg:border-r lg:rule lg:px-12">
-          <h2 className="display mb-4 text-[26px]">Integrations</h2>
-          <ul className="border-t border-ink text-[14px]">
-            <Integration name="Celo mainnet RPC" ok={status?.celoRpc.ok} detail={status?.celoRpc.ok ? `Block ${status.celoRpc.block}` : status?.celoRpc.error} />
-            <Integration name="Textile FX (USD₮ ↔ cNGN)" ok={status?.textile.ok} detail={status?.textile.ok ? `Live · 1 USD₮ ≈ ₦${status.textile.ngnPerUsd?.toFixed(2)} · auth: ${status.textile.auth}` : status?.textile.error} />
-            <Integration name="Agent model" ok={status?.agent.llm} warn detail={status ? (status.agent.llm ? `${status.agent.model} with tool use` : "No ANTHROPIC_API_KEY — local intent mode (same tools, no LLM)") : undefined} />
-            <Integration name="Supabase receipts" ok={status?.supabase} warn detail={status ? (status.supabase ? "Mirroring payment records" : "Not configured — receipts stored on this device") : undefined} />
-            <Integration name="Mono bank linking" ok={false} warn detail="Not available — use CSV import" />
-          </ul>
-          <dl className="mt-6 space-y-1 text-[12px] text-muted">
-            <div>Textile LimitOrderReactor: <a className="font-mono link" href={addressUrl(TEXTILE.reactor)} target="_blank" rel="noreferrer">{TEXTILE.reactor}</a></div>
-            <div>USD₮: <a className="font-mono link" href={addressUrl(TOKENS.USDT.address)} target="_blank" rel="noreferrer">{TOKENS.USDT.address}</a></div>
-            <div>cNGN: <a className="font-mono link" href={addressUrl(TOKENS.cNGN.address)} target="_blank" rel="noreferrer">{TOKENS.cNGN.address}</a></div>
-          </dl>
-        </div>
-        <div className="px-4 py-10 sm:px-8 lg:px-10">
-          <h2 className="display mb-4 text-[26px]">Your data</h2>
-          <p className="text-[14px] text-muted">
-            {state.transactions.length} transactions, {state.subscriptions.length} subscriptions and {state.payments.length} payment records are stored in this browser.
-          </p>
-          {!confirmReset ? (
-            <button className="btn btn-ghost mt-5 text-alert" onClick={() => setConfirmReset(true)}>Clear imported data</button>
-          ) : (
-            <div className="mt-5 flex items-center gap-3">
-              <button className="btn btn-primary bg-alert" onClick={() => { reset(); setConfirmReset(false); }}>Yes, clear everything</button>
-              <button className="btn btn-ghost" onClick={() => setConfirmReset(false)}>Cancel</button>
+      <section className="px-4 py-10 sm:px-8 lg:px-12">
+        <h2 className="display mb-4 text-[26px]">Contracts subscan uses</h2>
+        <dl className="max-w-3xl border-t border-ink text-[13px]">
+          {[
+            ["USD₮ token", TOKENS.USDT.address],
+            ["cNGN token", TOKENS.cNGN.address],
+            ["Textile FX LimitOrderReactor", TEXTILE.reactor],
+            ["ERC-8004 Identity Registry", ERC8004.identityRegistry],
+          ].map(([k, v]) => (
+            <div key={k} className="flex flex-col gap-1 border-b rule py-3 sm:flex-row sm:items-center sm:justify-between">
+              <dt className="text-muted">{k}</dt>
+              <dd><a className="font-mono text-[12px] link break-all" href={addressUrl(v)} target="_blank" rel="noreferrer">{v}</a></dd>
             </div>
-          )}
-        </div>
+          ))}
+        </dl>
+        <p className="mt-3 text-[12px] text-muted">Celo mainnet, chain {CHAIN_ID}. Addresses verified against Textile FX and Celo documentation. Network preferences live in <Link href="/settings" className="link">Settings</Link>.</p>
       </section>
     </div>
-  );
-}
-
-function Integration({ name, ok, detail, warn }: { name: string; ok?: boolean; detail?: string; warn?: boolean }) {
-  const dot = ok === undefined ? "bg-stone" : ok ? "bg-accent" : warn ? "bg-amber" : "bg-alert";
-  return (
-    <li className="flex items-start justify-between gap-4 border-b rule py-3">
-      <span className="flex items-center gap-2.5"><span className={`h-2 w-2 ${dot}`} />{name}</span>
-      <span className="max-w-[60%] text-right text-[12px] text-muted">{detail ?? "Checking…"}</span>
-    </li>
   );
 }

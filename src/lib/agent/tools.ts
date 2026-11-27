@@ -2,7 +2,11 @@
 // with every request) or live chain / Textile FX data. None of them moves funds:
 // prepare_payment produces a draft the user must review and approve in the UI.
 import { createPublicClient, erc20Abi, formatUnits, http, isAddress } from "viem";
-import { CHAIN, RPC_URL, TOKENS } from "../celo/config.ts";
+import { CHAIN, RPC_URL, TOKENS, type TokenSymbol } from "../celo/config.ts";
+
+function amt(atomic: string, t: TokenSymbol) {
+  return `${Number(formatUnits(BigInt(atomic), TOKENS[t].decimals)).toLocaleString("en-US", { maximumFractionDigits: t === "cNGN" ? 2 : 4 })} ${TOKENS[t].display}`;
+}
 import { duplicates, monthlyEquivalent, priceChanges, spendSummary, upcomingRenewals, wasteCandidates, type RateTable } from "../detection/analysis.ts";
 import { planPayment } from "../payments/plan.ts";
 import { formatRate, preview } from "../textile/client.ts";
@@ -165,9 +169,9 @@ export const TOOLS: ToolDef[] = [
             p.status === "preview" && p.takerPays && p.buyAmount
               ? {
                   kind: "indicative preview — the firm quote is requested at approval time",
-                  pay: `${formatUnits(BigInt(p.takerPays), TOKENS[plan.sourceToken].decimals)} ${plan.sourceToken}`,
-                  receive: `${formatUnits(BigInt(p.buyAmount), TOKENS[plan.destinationToken].decimals)} ${plan.destinationToken}`,
-                  fee: p.feeAmount ? `${formatUnits(BigInt(p.feeAmount), TOKENS[plan.sourceToken].decimals)} ${plan.sourceToken}` : null,
+                  pay: amt(p.takerPays, plan.sourceToken),
+                  receive: amt(p.buyAmount, plan.destinationToken),
+                  fee: p.feeAmount ? amt(p.feeAmount, plan.sourceToken) : null,
                   rate: formatRate(plan.sourceToken, plan.destinationToken, p.takerPays, p.buyAmount),
                   takerPaysAtomic: p.takerPays,
                 }
@@ -200,6 +204,34 @@ export const TOOLS: ToolDef[] = [
           ? ["Approve Textile reactor to spend source token (if allowance is short)", "Convert via Textile FX (firm quote, ~60s validity)", "Settle merchant"]
           : ["Settle merchant"],
       };
+    },
+  },
+  {
+    name: "propose_subscription_changes",
+    description:
+      "Propose status changes to the user's subscriptions: confirm (it is a real subscription), dismiss (not a subscription / not wanted in totals) or restore. Use when the user asks to confirm, dismiss, clean up or tidy their list. The changes are shown to the user with an Apply button; they are not applied until the user clicks it. Pass refs='high_confidence' to target every detected item with confidence >= 0.85.",
+    input_schema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["confirm", "dismiss", "restore"] },
+        refs: { type: "array", items: { type: "string" }, description: "Subscription ids or names, or ['high_confidence']" },
+        reason: { type: "string", description: "One short sentence explaining why" },
+      },
+      required: ["action", "refs"],
+      additionalProperties: false,
+    },
+    run: async (input, { state }) => {
+      const action = input.action as "confirm" | "dismiss" | "restore";
+      const refs = (input.refs as string[]) ?? [];
+      const targets = refs.includes("high_confidence")
+        ? state.subscriptions.filter((s) => s.status === "detected" && s.confidence >= 0.85)
+        : refs.map((r) => findSub(state, r)).filter((s): s is Subscription => !!s);
+      const status = action === "confirm" ? "confirmed" : action === "dismiss" ? "dismissed" : "detected";
+      const changes = [...new Map(targets.map((s) => [s.id, s])).values()]
+        .filter((s) => s.status !== status)
+        .map((s) => ({ id: s.id, name: s.displayName, from: s.status, to: status }));
+      const unknown = refs.filter((r) => r !== "high_confidence" && !findSub(state, r));
+      return { proposal: true, action, changes, reason: input.reason ?? null, not_found: unknown, note: "Not applied yet — the user must click Apply." };
     },
   },
   {

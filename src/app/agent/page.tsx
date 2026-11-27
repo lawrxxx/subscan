@@ -15,6 +15,7 @@ const PROMPTS = [
   "Which subscription renews next?",
   "Prepare my next international subscription payment",
   "Identify subscriptions I might be wasting money on",
+  "Confirm all high-confidence subscriptions",
   "What's in my wallet?",
 ];
 
@@ -27,6 +28,7 @@ const TOOL_LABEL: Record<string, string> = {
   check_wallet_balance: "Read wallet balance on Celo",
   prepare_payment: "Prepared payment draft",
   transaction_status: "Checked transaction status",
+  propose_subscription_changes: "Proposed subscription changes",
 };
 
 // Only what the agent's tools need is sent; raw statement rows stay on device.
@@ -35,7 +37,8 @@ function snapshot(state: AppState): AppState {
 }
 
 export default function Agent() {
-  const { state, ready } = useStore();
+  const { state, ready, updateSubscription } = useStore();
+  const [applied, setApplied] = useState<Record<string, boolean>>({});
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -117,7 +120,7 @@ export default function Agent() {
                       {t.trace.map((tr, j) => (
                         <li key={j} className="font-mono text-[11px] text-muted">
                           <span className={tr.error ? "text-alert" : "text-accent"}>→</span> {TOOL_LABEL[tr.name] ?? tr.name}
-                          {Object.keys(tr.input).length > 0 && <span className="text-faint"> {JSON.stringify(tr.input)}</span>}
+                          {Object.keys(tr.input).length > 0 && <span className="hidden text-faint sm:inline"> {JSON.stringify(tr.input)}</span>}
                         </li>
                       ))}
                     </ul>
@@ -125,6 +128,27 @@ export default function Agent() {
                   <div className={`text-[15px] leading-relaxed ${t.error ? "text-alert" : "text-ink"}`}>
                     <Markdown text={t.content} />
                   </div>
+                  {(t.trace ?? [])
+                    .filter((tr) => tr.name === "prepare_payment" && !(tr.result as { error?: string }).error)
+                    .map((tr, j) => (
+                      <div key={`d${j}`} className="mt-4 max-w-md xl:hidden">
+                        <Draft d={tr.result as DraftResult} />
+                      </div>
+                    ))}
+                  {(t.trace ?? [])
+                    .map((tr, j) => ({ tr, key: `${i}-${j}` }))
+                    .filter(({ tr }) => tr.name === "propose_subscription_changes" && ((tr.result as Proposal).changes?.length ?? 0) > 0)
+                    .map(({ tr, key }) => (
+                      <ProposalCard
+                        key={key}
+                        p={tr.result as Proposal}
+                        applied={!!applied[key]}
+                        onApply={() => {
+                          (tr.result as Proposal).changes.forEach((c) => updateSubscription(c.id, { status: c.to }));
+                          setApplied((a) => ({ ...a, [key]: true }));
+                        }}
+                      />
+                    ))}
                 </div>
               ),
             )}
@@ -186,6 +210,41 @@ function Draft({ d }: { d: DraftResult }) {
       {d.plan.problems.length > 0 && <ul className="space-y-1 border-t rule px-4 py-3 text-[12px] text-alert">{d.plan.problems.map((p) => <li key={p}>{p}</li>)}</ul>}
       <div className="border-t border-ink p-3">
         <Link href={d.review_url} className="btn btn-primary w-full">Review &amp; approve</Link>
+      </div>
+    </div>
+  );
+}
+
+interface Proposal {
+  action: "confirm" | "dismiss" | "restore";
+  changes: { id: string; name: string; from: string; to: "confirmed" | "dismissed" | "detected" }[];
+  reason: string | null;
+}
+
+function ProposalCard({ p, applied, onApply }: { p: Proposal; applied: boolean; onApply(): void }) {
+  const verb = p.action === "confirm" ? "Confirm" : p.action === "dismiss" ? "Dismiss" : "Restore";
+  return (
+    <div className="mt-4 max-w-xl border border-ink">
+      <div className="flex items-center justify-between border-b rule px-4 py-2.5">
+        <span className="kicker">Proposed change</span>
+        <span className="text-[12px] text-muted">{p.changes.length} item{p.changes.length > 1 ? "s" : ""}</span>
+      </div>
+      <ul className="divide-y divide-rule px-4 text-[14px]">
+        {p.changes.map((c) => (
+          <li key={c.id} className="flex items-center justify-between py-2">
+            <Link href={`/subscriptions/${encodeURIComponent(c.id)}`} className="hover:underline">{c.name}</Link>
+            <span className="text-[12px] text-muted">{c.from} → <span className={c.to === "dismissed" ? "text-alert" : c.to === "confirmed" ? "text-accent" : ""}>{c.to}</span></span>
+          </li>
+        ))}
+      </ul>
+      {p.reason && <p className="border-t rule px-4 py-2 text-[12px] text-muted">{p.reason}</p>}
+      <div className="flex items-center gap-3 border-t border-ink px-4 py-3">
+        {applied ? (
+          <span className="text-[13px] text-accent">Applied ✓</span>
+        ) : (
+          <button className="btn btn-primary h-9" onClick={onApply}>{verb} {p.changes.length > 1 ? `all ${p.changes.length}` : ""}</button>
+        )}
+        <span className="text-[12px] text-muted">Changes your list on this device only.</span>
       </div>
     </div>
   );

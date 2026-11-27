@@ -10,6 +10,11 @@ export function active(subs: Subscription[]) {
   return subs.filter((s) => s.status !== "dismissed");
 }
 
+/** Still being charged: not dismissed and not lapsed. Used for totals and renewals. */
+export function live(subs: Subscription[]) {
+  return active(subs).filter((s) => !s.lapsed);
+}
+
 export function monthlyEquivalent(s: Subscription) {
   return s.amount * MONTHLY_FACTOR[s.frequency];
 }
@@ -27,12 +32,13 @@ export interface SpendSummary {
   annualHome: number | null;
   unconverted: string[];
   activeCount: number;
+  lapsedCount: number;
   confirmedCount: number;
   byCategory: { category: string; monthlyHome: number }[];
 }
 
 export function spendSummary(subs: Subscription[], home: string, rates: RateTable = {}): SpendSummary {
-  const list = active(subs);
+  const list = live(subs);
   const map = new Map<string, { monthly: number; count: number }>();
   for (const s of list) {
     const cur = map.get(s.currency) ?? { monthly: 0, count: 0 };
@@ -59,6 +65,7 @@ export function spendSummary(subs: Subscription[], home: string, rates: RateTabl
     annualHome: monthlyHome === null ? null : monthlyHome * 12,
     unconverted,
     activeCount: list.length,
+    lapsedCount: active(subs).filter((s) => s.lapsed).length,
     confirmedCount: list.filter((s) => s.status === "confirmed").length,
     byCategory: [...cat.entries()].map(([category, monthlyHome]) => ({ category, monthlyHome })).sort((a, b) => b.monthlyHome - a.monthlyHome),
   };
@@ -66,7 +73,7 @@ export function spendSummary(subs: Subscription[], home: string, rates: RateTabl
 
 export function upcomingRenewals(subs: Subscription[], today: string, withinDays = 30) {
   const t0 = toTime(today);
-  return active(subs)
+  return live(subs)
     .map((s) => ({ ...s, daysUntil: Math.round((toTime(s.nextRenewal) - t0) / DAY) }))
     .filter((s) => s.daysUntil >= 0 && s.daysUntil <= withinDays)
     .sort((a, b) => a.daysUntil - b.daysUntil);

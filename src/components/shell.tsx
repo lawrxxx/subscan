@@ -7,14 +7,18 @@ import { useWallet } from "./wallet";
 import { shortHash } from "@/lib/format";
 
 const NAV = [
-  { href: "/", label: "Overview", n: "01" },
-  { href: "/agent", label: "Agent", n: "02" },
-  { href: "/activity", label: "Payments", n: "03" },
-  { href: "/wallet", label: "Wallet & settings", n: "04" },
+  { href: "/", label: "Overview", n: "01", short: "Overview" },
+  { href: "/subscriptions", label: "Subscriptions", n: "02", short: "Subs" },
+  { href: "/agent", label: "Agent", n: "03", short: "Agent" },
+  { href: "/activity", label: "Payments", n: "04", short: "Payments" },
+  { href: "/wallet", label: "Wallet", n: "05", short: "Wallet" },
+  { href: "/settings", label: "Settings", n: "06", short: "Settings" },
 ];
+const MOBILE_NAV = NAV.slice(0, 5);
 
 function active(path: string, href: string) {
-  if (href === "/") return path === "/" || path.startsWith("/subscriptions") || path.startsWith("/pay");
+  if (href === "/") return path === "/";
+  if (href === "/subscriptions") return path.startsWith("/subscriptions") || path.startsWith("/pay");
   return path.startsWith(href);
 }
 
@@ -70,19 +74,25 @@ export function Shell({ children }: { children: ReactNode }) {
         <Wordmark className="text-[22px]" />
         <div className="flex items-center gap-2">
           {state.dataSource === "sample" && <span className="tag border-amber/40 bg-amber-wash text-amber">Sample</span>}
-          <Link href="/wallet" className="font-mono text-[11px] text-muted">
-            {w.address ? shortHash(w.address, 3) : "Connect"}
-          </Link>
+          <Link href="/settings" aria-label="Settings" className={`text-[12px] ${path.startsWith("/settings") ? "text-ink" : "text-muted"}`}>Settings</Link>
         </div>
       </header>
 
-      <main className="min-w-0 pb-24 lg:pb-0">{children}</main>
+      <main className="min-w-0 pb-24 lg:pb-0">
+        {state.dataSource === "sample" && (
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-amber/30 bg-amber-wash/70 px-4 py-2 text-[12px] text-amber sm:px-8 lg:px-12">
+            <span><strong className="font-semibold">Sample data.</strong> These subscriptions come from a made-up statement, not your accounts.</span>
+            <Link href="/onboarding" className="underline underline-offset-2">Import your own statement →</Link>
+          </div>
+        )}
+        {children}
+      </main>
 
-      <nav className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-4 border-t rule bg-paper/95 backdrop-blur lg:hidden">
-        {NAV.map((n) => (
+      <nav className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-5 border-t rule bg-paper/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">
+        {MOBILE_NAV.map((n) => (
           <Link key={n.href} href={n.href} className={`flex flex-col items-center gap-0.5 py-2.5 text-[11px] ${active(path, n.href) ? "text-ink" : "text-muted"}`}>
             <span className={`num text-[10px] ${active(path, n.href) ? "text-accent" : "text-faint"}`}>{n.n}</span>
-            {n.label.split(" ")[0]}
+            {n.short}
           </Link>
         ))}
       </nav>
