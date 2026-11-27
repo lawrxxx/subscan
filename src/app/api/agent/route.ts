@@ -1,18 +1,30 @@
 import { NextResponse } from "next/server";
-import Anthropic from "@anthropic-ai/sdk";
-import { runClaude, runLocal, type ChatTurn } from "@/lib/agent/run";
+import { AgentUnavailable, describeError, GEMINI_MODEL, runGemini, type ChatTurn } from "@/lib/agent/run";
 import { indicativeUsdNgn } from "@/lib/textile/rate";
 import type { RateTable } from "@/lib/detection/analysis";
 import type { AppState } from "@/lib/types";
 
 export const maxDuration = 120;
 
+/** Lets the UI show an "agent unavailable" state before the user types anything. */
+export async function GET() {
+  return NextResponse.json({ data: { available: !!process.env.GEMINI_API_KEY, model: GEMINI_MODEL } });
+}
+
 export async function POST(req: Request) {
   const body = (await req.json().catch(() => null)) as { messages?: ChatTurn[]; state?: AppState } | null;
   if (!body?.messages?.length || !body.state) return NextResponse.json({ error: "messages and state required" }, { status: 400 });
-  const history = body.messages.filter((m) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string").slice(-20);
+  const history = body.messages
+    .filter((m) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
+    .slice(-20)
+    .map((m) => ({ role: m.role, content: m.content.slice(0, 4000) }));
   if (history[history.length - 1]?.role !== "user") return NextResponse.json({ error: "last message must be from the user" }, { status: 400 });
+  if (!process.env.GEMINI_API_KEY) {
+    const { error, code } = describeError(new AgentUnavailable());
+    return NextResponse.json({ error, code }, { status: 503 });
+  }
 
+  // The state stays on this server: tools compute over it and only their (redacted) results go to the model.
   const rates: RateTable = {};
   if (body.state.settings.homeCurrency === "NGN") {
     try {
@@ -24,13 +36,10 @@ export async function POST(req: Request) {
   const ctx = { state: body.state, rates, today: new Date().toISOString().slice(0, 10) };
 
   try {
-    const hasKey = !!(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
-    const reply = hasKey ? await runClaude(history, ctx) : await runLocal(history[history.length - 1].content, ctx);
-    return NextResponse.json({ data: reply });
+    return NextResponse.json({ data: await runGemini(history, ctx) });
   } catch (e) {
-    if (e instanceof Anthropic.RateLimitError) return NextResponse.json({ error: "The agent is rate limited. Try again in a moment." }, { status: 429 });
-    if (e instanceof Anthropic.AuthenticationError) return NextResponse.json({ error: "Anthropic API key rejected. Check ANTHROPIC_API_KEY." }, { status: 401 });
-    if (e instanceof Anthropic.APIError) return NextResponse.json({ error: `Agent model error (${e.status}): ${e.message}` }, { status: 502 });
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Agent failed" }, { status: 500 });
+    const { status, error, code } = describeError(e);
+    console.error("agent error", code, e instanceof Error ? e.message : e);
+    return NextResponse.json({ error, code }, { status });
   }
 }

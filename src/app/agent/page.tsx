@@ -11,7 +11,8 @@ import { Markdown } from "@/components/bits";
 import { Avatar, EmptyPanel, Icon, PageBar, PayStatus, UploadButton } from "@/components/ui";
 
 interface Trace { name: string; input: Record<string, unknown>; result: unknown; error?: boolean }
-interface Turn { role: "user" | "assistant"; content: string; trace?: Trace[]; mode?: "claude" | "local"; error?: boolean }
+interface Evidence { bills: { id: string; name: string }[]; transactions: { date: string; description: string; amount: number; currency: string; direction: string }[] }
+interface Turn { role: "user" | "assistant"; content: string; trace?: Trace[]; evidence?: Evidence; model?: string; error?: boolean; retry?: string }
 
 const PROMPTS = [
   "How much do I owe this month?",
@@ -38,6 +39,8 @@ const TOOL_LABEL: Record<string, string> = {
   savings_analysis: "Estimated savings",
 };
 
+type Availability = { available: boolean; model?: string } | null;
+
 // The agent gets structured data only — never the statement file. Transactions are
 // trimmed to the fields its tools use and the most recent 2,000 rows.
 function snapshot(state: AppState): AppState {
@@ -58,6 +61,10 @@ export default function Agent() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [avail, setAvail] = useState<Availability>(null);
+  useEffect(() => {
+    fetch("/api/agent").then((r) => r.json()).then((j) => setAvail(j.data)).catch(() => setAvail({ available: false }));
+  }, []);
   const end = useRef<HTMLDivElement>(null);
   const chat = useRef<HTMLDivElement>(null);
 
@@ -67,8 +74,9 @@ export default function Agent() {
 
   async function ask(q: string) {
     const question = q.trim();
-    if (!question || busy) return;
-    const next: Turn[] = [...turns, { role: "user", content: question }];
+    if (!question || busy || avail?.available === false) return;
+    const base = turns.length && turns[turns.length - 1].error ? turns.slice(0, -2) : turns;
+    const next: Turn[] = [...base, { role: "user", content: question }];
     setTurns(next);
     setInput("");
     setBusy(true);
@@ -80,10 +88,14 @@ export default function Agent() {
         body: JSON.stringify({ messages: next.filter((t) => !t.error).map(({ role, content }) => ({ role, content })), state: snapshot(state) }),
       });
       const j = await r.json();
-      if (!r.ok) throw new Error(j.error ?? "Agent unavailable");
-      setTurns([...next, { role: "assistant", content: j.data.text, trace: j.data.trace, mode: j.data.mode }]);
+      if (!r.ok) {
+        if (j.code === "unavailable") setAvail({ available: false });
+        throw new Error(j.error ?? "The agent is unavailable.");
+      }
+      setTurns([...next, { role: "assistant", content: j.data.text, trace: j.data.trace, evidence: j.data.evidence, model: j.data.model }]);
     } catch (e) {
-      setTurns([...next, { role: "assistant", content: e instanceof Error ? e.message : String(e), error: true }]);
+      const msg = e instanceof Error && e.message !== "Failed to fetch" ? e.message : "Couldn't reach the agent. Check your connection.";
+      setTurns([...next, { role: "assistant", content: msg, error: true, retry: question }]);
     } finally {
       setBusy(false);
     }
@@ -92,7 +104,7 @@ export default function Agent() {
   // Deep links (e.g. "Ask the agent" on the overview) arrive as ?q=…
   const asked = useRef(false);
   useEffect(() => {
-    if (!ready || asked.current || (!state.subscriptions.length && !state.transactions.length)) return;
+    if (!ready || !avail?.available || asked.current || (!state.subscriptions.length && !state.transactions.length)) return;
     const q = new URLSearchParams(window.location.search).get("q");
     if (q) {
       asked.current = true;
@@ -100,7 +112,7 @@ export default function Agent() {
       void ask(q.slice(0, 300));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, state.subscriptions.length]);
+  }, [ready, avail, state.subscriptions.length]);
 
   const subs = state.subscriptions;
   const attention = useMemo(() => attentionItems(state, today).filter((a) => !a.id.startsWith("pd-") && a.id !== "review"), [state, today]);
@@ -116,7 +128,6 @@ export default function Agent() {
     return [...acts, ...paid].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 8);
   }, [state.actions, state.payments]);
 
-  const lastMode = [...turns].reverse().find((t) => t.mode)?.mode;
 
   if (!ready) return null;
   if (!subs.length && !state.transactions.length)
@@ -144,7 +155,7 @@ export default function Agent() {
       <PageBar
         title="Agent"
         sub="Work the agent has queued up from your statements. Nothing changes or moves money until you approve it."
-        actions={lastMode && <span className={`pill ${lastMode === "local" ? "pill-amber" : "pill-green"}`}>{lastMode === "claude" ? "Claude with tools" : "Local mode · no model key"}</span>}
+        actions={avail && (avail.available ? <span className="pill pill-green" title={avail.model}>Gemini · live</span> : <span className="pill pill-red">Assistant unavailable</span>)}
       />
 
       <div className="grid gap-4 px-4 sm:px-6 lg:px-8 xl:grid-cols-[minmax(0,1fr)_420px]">
@@ -212,7 +223,7 @@ export default function Agent() {
                       <div className="text-[12.5px] text-muted">{readableDates(f.reason[0].toUpperCase() + f.reason.slice(1))}</div>
                     </div>
                   </div>
-                  <button className="btn btn-ghost btn-sm shrink-0" onClick={() => ask(`Should I cancel ${f.name}?`)}>Ask why</button>
+                  {avail?.available !== false && <button className="btn btn-ghost btn-sm shrink-0" onClick={() => ask(`Should I cancel ${f.name}?`)}>Ask why</button>}
                 </li>
               ))}
               {inc.nextPayday && (
@@ -221,7 +232,7 @@ export default function Agent() {
                     <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-info" />
                     <div className="min-w-0"><div className="text-[13.5px] font-medium">Plan bills before payday</div><div className="text-[12.5px] text-muted">Next income expected around {date(inc.nextPayday)}.</div></div>
                   </div>
-                  <button className="btn btn-ghost btn-sm shrink-0" onClick={() => ask("Help me organise my bills before payday")}>Plan it</button>
+                  {avail?.available !== false && <button className="btn btn-ghost btn-sm shrink-0" onClick={() => ask("Help me organise my bills before payday")}>Plan it</button>}
                 </li>
               )}
               {!attention.length && !savings.flags.length && !inc.nextPayday && <li className="px-5 py-4 text-[13px] text-muted">No recommendations right now.</li>}
@@ -272,9 +283,14 @@ export default function Agent() {
         <section ref={chat} className="panel flex min-h-[420px] flex-col xl:sticky xl:top-6 xl:h-[calc(100dvh-140px)] xl:self-start">
           <div className="panel-head"><h2 className="panel-title flex items-center gap-2"><Icon name="agent" size={16} className="text-accent" />Ask the agent</h2>{turns.length > 0 && <button className="btn btn-quiet btn-sm" onClick={() => { setTurns([]); setApplied({}); }}>Clear</button>}</div>
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-            {!turns.length ? (
+            {avail?.available === false ? (
+              <div className="rounded-[6px] bg-paper-2 px-3 py-3 text-[13px]">
+                <div className="font-medium">The assistant isn&rsquo;t available right now</div>
+                <p className="mt-1 text-muted">This deployment has no Gemini API key configured, so questions can&rsquo;t be answered. Everything else on this page comes straight from your statements and still works.</p>
+              </div>
+            ) : !turns.length ? (
               <div>
-                <p className="text-[13px] text-muted">Ask about your spending, plan around payday or have it prepare a payment. It uses the tools listed under each answer so you can see what it looked at.</p>
+                <p className="text-[13px] text-muted">Ask about your bills, spending or what&rsquo;s due. Answers are worked out from your imported statements, and each one shows the bills and transactions it used.</p>
                 <div className="mt-3 flex flex-wrap gap-1.5">
                   {PROMPTS.map((p) => <button key={p} onClick={() => ask(p)} className="rounded-full border rule bg-surface px-3 py-1.5 text-left text-[12.5px] hover:border-line-strong hover:bg-paper-2">{p}</button>)}
                 </div>
@@ -292,6 +308,8 @@ export default function Agent() {
                         </ul>
                       )}
                       <div className={`text-[13.5px] leading-relaxed ${t.error ? "text-alert" : ""}`}><Markdown text={t.content} /></div>
+                      {t.error && t.retry && avail?.available !== false && <button className="btn btn-ghost btn-sm mt-2" onClick={() => ask(t.retry!)}>Try again</button>}
+                      {t.evidence && (t.evidence.bills.length > 0 || t.evidence.transactions.length > 0) && <EvidenceList e={t.evidence} />}
                       {(t.trace ?? []).filter((tr) => tr.name === "prepare_payment" && !(tr.result as { error?: string }).error).map((tr, j) => <div key={`d${j}`} className="mt-3"><Draft d={tr.result as DraftResult} /></div>)}
                       {(t.trace ?? [])
                         .map((tr, j) => ({ tr, key: `${i}-${j}` }))
@@ -325,12 +343,43 @@ export default function Agent() {
             }}
           >
             <div className="flex gap-2">
-              <input className="input flex-1" placeholder="Ask about your bills…" value={input} onChange={(e) => setInput(e.target.value)} disabled={busy} aria-label="Message the agent" />
-              <button className="btn btn-primary" disabled={busy || !input.trim()}>Send</button>
+              <input className="input flex-1" placeholder={avail?.available === false ? "Assistant unavailable" : "Ask about your bills…"} value={input} onChange={(e) => setInput(e.target.value)} disabled={busy || avail?.available === false} aria-label="Message the agent" />
+              <button className="btn btn-primary" disabled={busy || !input.trim() || avail?.available === false}>Send</button>
             </div>
           </form>
         </section>
       </div>
+    </div>
+  );
+}
+
+function EvidenceList({ e }: { e: Evidence }) {
+  const [open, setOpen] = useState(false);
+  const n = e.bills.length + e.transactions.length;
+  return (
+    <div className="mt-2 text-[12.5px]">
+      <button className="text-muted hover:text-ink" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+        {open ? "Hide" : "Show"} what this is based on ({n})
+      </button>
+      {open && (
+        <div className="mt-1.5 rounded-[6px] border rule bg-surface">
+          {e.bills.length > 0 && (
+            <div className="flex flex-wrap gap-1 px-3 py-2">
+              {e.bills.map((b) => <Link key={b.id} href={`/bills/${encodeURIComponent(b.id)}`} className="tag hover:border-line-strong">{b.name}</Link>)}
+            </div>
+          )}
+          {e.transactions.length > 0 && (
+            <ul className={`divide-y divide-[var(--color-rule-soft)] ${e.bills.length ? "border-t rule" : ""}`}>
+              {e.transactions.map((t, i) => (
+                <li key={i} className="flex justify-between gap-3 px-3 py-1.5">
+                  <span className="min-w-0 truncate"><span className="num text-muted">{date(t.date)}</span> · {t.description}</span>
+                  <span className={`num shrink-0 ${t.direction === "credit" ? "text-accent" : ""}`}>{t.direction === "credit" ? "+" : "−"}{money(t.amount, t.currency)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   );
 }

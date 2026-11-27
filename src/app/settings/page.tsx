@@ -74,7 +74,7 @@ export default function Settings() {
         <ul className="border-t rule text-[14px]">
           <Integration name="Celo mainnet RPC" ok={status?.celoRpc.ok} detail={status ? (status.celoRpc.ok ? `Connected · block ${status.celoRpc.block}` : "Unreachable") : undefined} />
           <Integration name="Textile FX · USD₮ ↔ cNGN" ok={status?.textile.ok} detail={status ? (status.textile.ok ? `Live · 1 USD₮ ≈ ₦${status.textile.ngnPerUsd?.toFixed(2)}` : "Unreachable") : undefined} />
-          <Integration name="Agent model" ok={status?.agent.llm} warn detail={status ? (status.agent.llm ? `${status.agent.model} with tools` : "Local intent mode — same tools, no language model") : undefined} />
+          <Integration name="Agent (Google Gemini)" ok={status?.agent.llm} detail={status ? (status.agent.llm ? `${status.agent.model} · function calling` : "Unavailable — GEMINI_API_KEY not set") : undefined} />
           <Integration name="Storage" ok detail="This browser (localStorage) — no server database" />
           <Integration name="Transaction attribution (ERC-8021)" ok={status ? true : undefined} warn={!status?.attribution?.assigned} detail={status ? `App code “${ATTRIBUTION_CODES.join("”, “")}”${status.attribution?.assigned ? "" : " · no hackathon code set"}` : undefined} />
         </ul>
