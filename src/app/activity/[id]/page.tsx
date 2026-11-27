@@ -65,23 +65,23 @@ export default function Receipt() {
   }, [hashes]);
 
   if (!ready) return null;
-  if (!p) return <Missing what="receipt" back="/activity" backLabel="All payments" />;
+  if (!p) return <Missing what="receipt" back="/activity" backLabel="Back to activity" />;
   const created = new Date(p.createdAt);
   return (
-    <div className="px-4 py-10 sm:px-8 lg:px-12">
-      <div className="mb-6 text-[13px]"><Link href="/activity" className="text-muted link">Payments</Link> <span className="text-faint">/</span> Receipt</div>
-      <article className="mx-auto max-w-2xl border border-ink bg-[#faf8f3]">
-        <header className="flex items-start justify-between border-b border-ink px-6 py-6 sm:px-8">
+    <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+      <div className="mb-5 text-[13px]"><Link href="/activity?tab=payments" className="text-muted link">Activity</Link> <span className="text-faint">/</span> Receipt</div>
+      <article className="panel mx-auto max-w-2xl">
+        <header className="flex items-start justify-between border-b rule px-6 py-5 sm:px-8">
           <div>
-            <div className="kicker mb-2">{p.status === "prepared" ? "Prepared payment · not broadcast" : p.status === "confirmed" ? "Receipt · Celo mainnet" : "Payment · Celo mainnet"}</div>
-            <h1 className="display text-[36px]">{p.merchant}</h1>
+            <div className="label mb-2">{p.status === "prepared" ? "Prepared payment · not broadcast" : p.status === "confirmed" ? "Receipt · Celo mainnet" : "Payment · Celo mainnet"}</div>
+            <h1 className="title text-[28px]">{p.merchant}</h1>
             <div className="mt-1 text-[13px] text-muted">{created.toLocaleString("en-GB", { dateStyle: "long", timeStyle: "short" })}</div>
           </div>
           <TxStatus status={p.status} />
         </header>
         <div className="px-6 py-6 sm:px-8">
-          <div className="kicker mb-1">{p.status === "confirmed" ? "Merchant received" : "Merchant will receive"}</div>
-          <div className="figure text-[64px]">{p.destinationAmount}<span className="ml-2 text-[0.35em] text-muted">{TOKENS[p.destinationToken].display}</span></div>
+          <div className="label mb-1">{p.status === "confirmed" ? "Merchant received" : "Merchant will receive"}</div>
+          <div className="figure text-[40px]">{p.destinationAmount}<span className="ml-2 text-[0.35em] text-muted">{TOKENS[p.destinationToken].display}</span></div>
           <dl className="mt-6 border-t rule text-[14px]">
             {[
               [p.status === "confirmed" ? "Paid from" : "Pays from", `${p.sourceAmount} ${TOKENS[p.sourceToken].display}`],
@@ -95,8 +95,8 @@ export default function Receipt() {
             {p.recipient && <div className="flex justify-between gap-4 border-b rule py-2.5"><dt className="text-muted">Recipient</dt><dd><a href={addressUrl(p.recipient)} target="_blank" rel="noreferrer" className="font-mono text-[12px] link">{p.recipient.slice(0, 10)}…{p.recipient.slice(-6)} ↗</a></dd></div>}
             {p.from && <div className="flex justify-between gap-4 border-b rule py-2.5"><dt className="text-muted">From wallet</dt><dd><a href={addressUrl(p.from)} target="_blank" rel="noreferrer" className="font-mono text-[12px] link">{p.from.slice(0, 10)}…{p.from.slice(-6)} ↗</a></dd></div>}
           </dl>
-          <h2 className="kicker mt-8 mb-2">Transactions</h2>
-          <ol className="border-t border-ink">
+          <h2 className="label mt-8 mb-2">Transactions</h2>
+          <ol className="border-t rule">
             {p.steps.map((s, i) => (
               <li key={i} className="border-b rule py-3">
                 <div className="flex items-center justify-between gap-3"><span className="text-[14px]">{s.label}</span><TxStatus status={s.status} /></div>
@@ -115,9 +115,9 @@ export default function Receipt() {
             ))}
           </ol>
           {p.status === "prepared" && (
-            <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-l-2 border-amber bg-amber-wash/50 px-4 py-3 text-[13px]">
+            <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-[6px] bg-amber-wash px-4 py-3 text-[13px]">
               <span>Nothing has been signed. Amounts are indicative until a firm quote is taken.</span>
-              <Link href={`/pay/${encodeURIComponent(p.subscriptionId)}`} className="btn btn-primary h-9">Continue to approval</Link>
+              <Link href={`/pay/${encodeURIComponent(p.subscriptionId)}`} className="btn btn-primary btn-sm">Continue to approval</Link>
             </div>
           )}
           <p className="mt-6 text-[11px] text-muted">Status is read from Celo mainnet receipts. Hashes link to Celoscan.</p>

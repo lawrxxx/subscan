@@ -1,14 +1,13 @@
 "use client";
-// Application state: subscriptions, imported transactions, payment records and
-// preferences. Persisted through a StorageAdapter (browser localStorage today).
+// Application state: the user's imported transactions, detected bills, payment
+// records, agent actions and preferences. Persisted through a StorageAdapter
+// (browser localStorage). Nothing is ever seeded — a new user starts empty.
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { detectSubscriptions, mergeWithPrevious } from "../detection/engine";
-import { extractCsv } from "../import/csv";
 import { mergeTransactions, rowsToTransactions } from "../import/normalise";
 import type { ExtractedRow } from "../import/types";
-import { sampleStatementCsv } from "../sample";
-import type { AppSettings, AppState, ImportRecord, PaymentRecord, Subscription } from "../types";
-import { browserStorage, DEMO_KEY, readMode, USER_KEY, writeMode, type StorageAdapter } from "./storage";
+import type { AgentAction, AppSettings, AppState, ImportRecord, PaymentRecord, Subscription } from "../types";
+import { browserStorage, purgeLegacyKeys, USER_KEY, type StorageAdapter } from "./storage";
 
 const EMPTY: AppState = {
   transactions: [],
@@ -23,19 +22,38 @@ function withLapsed(subs: Subscription[]): Subscription[] {
   return subs.map((s) => ({ ...s, lapsed: !s.manual && (now - Date.parse(`${s.lastCharge}T00:00:00Z`)) / 86_400_000 > s.intervalDays * 2.2 }));
 }
 
-export type Workspace = "user" | "demo";
+/** Test fixture subscan once published for mainnet testing — never treated as user finances. */
+const FIXTURE_FILES = new Set(["test-merchant.csv"]);
+const FIXTURE_NARRATION = /^TEST MERCHANT MONTHLY PLAN$/i;
+
+/**
+ * Remove anything that isn't the user's own data:
+ *  - sample/demo statements stored by older builds,
+ *  - the published test-merchant fixture and bills derived from it.
+ * Records of real payments and preferences are always kept.
+ */
+export function sanitize(s: AppState): AppState {
+  if (s.dataSource === "sample") return { ...EMPTY, settings: s.settings, payments: s.payments.filter((p) => p.status !== "prepared"), actions: s.actions };
+  const fixtureImports = new Set((s.imports ?? []).filter((i) => FIXTURE_FILES.has(i.fileName)).map((i) => i.id));
+  const isFixtureTx = (t: AppState["transactions"][number]) => t.source === "sample" || FIXTURE_NARRATION.test(t.description) || [...fixtureImports].some((id) => t.id.startsWith(`${id}-`));
+  const transactions = s.transactions.filter((t) => !isFixtureTx(t));
+  if (transactions.length === s.transactions.length && fixtureImports.size === 0) return s;
+  const removedMerchants = new Set(s.transactions.filter(isFixtureTx).map((t) => t.merchant));
+  return {
+    ...s,
+    transactions,
+    subscriptions: s.subscriptions.filter((x) => x.manual || !removedMerchants.has(x.merchant)),
+    imports: (s.imports ?? []).filter((i) => !fixtureImports.has(i.id)),
+    dataSource: transactions.length ? s.dataSource : undefined,
+  };
+}
 
 interface Store {
   ready: boolean;
   storage: StorageAdapter["kind"];
-  /** Which workspace is showing. Demo data never touches the user's own data. */
-  mode: Workspace;
   state: AppState;
-  /** Open the demo workspace with a fresh sample statement (the user's data is untouched). */
-  enterDemo(): void;
-  exitDemo(): void;
   /** Save reviewed rows: de-duplicate against existing data, then re-run detection. */
-  importRows(rows: ExtractedRow[], meta: { fileName: string; format: string; source: "csv" | "pdf" | "sample" }): { record: ImportRecord; subscriptions: Subscription[] };
+  importRows(rows: ExtractedRow[], meta: { fileName: string; format: string; source: "csv" | "pdf" }): { record: ImportRecord; subscriptions: Subscription[] };
   removeImport(importId: string): void;
   addManual(sub: Subscription): void;
   removeSubscription(id: string): void;
@@ -43,6 +61,7 @@ interface Store {
   updateSettings(patch: Partial<AppSettings>): void;
   upsertPayment(p: PaymentRecord): void;
   removePayment(id: string): void;
+  logAction(a: Omit<AgentAction, "id" | "at">): void;
   reset(): void;
 }
 
@@ -53,142 +72,67 @@ function hydrate(saved: AppState | null): AppState {
   return { ...EMPTY, ...saved, subscriptions: withLapsed(saved.subscriptions ?? []), settings: { ...EMPTY.settings, ...saved.settings } };
 }
 
-/**
- * Older versions kept the sample statement in the same slot as real data.
- * Strip it out so a sample is never presented as the user's own finances.
- * Preferences and records of real payments are kept.
- */
-function withoutLegacySample(s: AppState): AppState {
-  if (s.dataSource !== "sample") return s;
-  return { ...EMPTY, settings: s.settings, payments: s.payments.filter((p) => p.status !== "prepared") };
-}
-
-export function StoreProvider({ children, userAdapter = browserStorage(USER_KEY), demoAdapter = browserStorage(DEMO_KEY) }: { children: ReactNode; userAdapter?: StorageAdapter; demoAdapter?: StorageAdapter }) {
-  const [mode, setMode] = useState<Workspace>("user");
+export function StoreProvider({ children, adapter: given }: { children: ReactNode; adapter?: StorageAdapter }) {
+  // One adapter for the provider's lifetime — a new one each render would re-run the load effect forever.
+  const [adapter] = useState<StorageAdapter>(() => given ?? browserStorage(USER_KEY));
   const [state, setState] = useState<AppState>(EMPTY);
   const [ready, setReady] = useState(false);
   const ref = useRef(state);
   ref.current = state;
-  const modeRef = useRef(mode);
-  modeRef.current = mode;
-  const adapter = mode === "demo" ? demoAdapter : userAdapter;
 
   useEffect(() => {
     let live = true;
-    const m = readMode();
-    Promise.all([userAdapter.load(), demoAdapter.load()]).then(([user, demo]) => {
+    purgeLegacyKeys();
+    adapter.load().then((saved) => {
       if (!live) return;
-      let u = hydrate(user);
-      const cleaned = withoutLegacySample(u);
-      if (cleaned !== u) {
-        u = cleaned;
-        void userAdapter.save(u);
-      }
-      const useDemo = m === "demo" && !!demo;
-      setMode(useDemo ? "demo" : "user");
-      setState(useDemo ? hydrate(demo) : u);
+      const loaded = hydrate(saved);
+      const clean = sanitize(loaded);
+      if (clean !== loaded) void adapter.save(clean);
+      setState(clean);
       setReady(true);
     });
     return () => {
       live = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [adapter]);
 
-  /** Apply a change to the active workspace and persist it to that workspace only. */
   const commit = useCallback(
     (fn: (s: AppState) => AppState) => {
       const next = fn(ref.current);
       ref.current = next;
       setState(next);
-      void (modeRef.current === "demo" ? demoAdapter : userAdapter).save(next);
+      void adapter.save(next);
     },
-    [demoAdapter, userAdapter],
-  );
-
-  /** Switch workspaces synchronously from what is already stored. */
-  const switchTo = useCallback(
-    async (m: Workspace, demoState?: AppState) => {
-      const next = m === "demo" ? (demoState ?? hydrate(await demoAdapter.load())) : hydrate(await userAdapter.load());
-      if (demoState) await demoAdapter.save(demoState);
-      writeMode(m);
-      modeRef.current = m;
-      ref.current = next;
-      setMode(m);
-      setState(next);
-    },
-    [demoAdapter, userAdapter],
+    [adapter],
   );
 
   const store = useMemo<Store>(() => {
-    const redetect = (txs: AppState["transactions"], previous: Subscription[]) => {
-      const fresh = detectSubscriptions(txs, { homeCurrency: ref.current.settings.homeCurrency });
-      return mergeWithPrevious(fresh, previous);
-    };
-    const importRows: Store["importRows"] = (rows, meta) => {
-      const cur = ref.current;
-      if (meta.source !== "sample" && modeRef.current === "demo") {
-        throw new Error("Exit demo mode before importing your own statement.");
-      }
-      const id = `imp_${Date.now().toString(36)}`;
-      const incoming = rowsToTransactions(rows, meta.source, id);
-      // The demo workspace is regenerated rather than merged.
-      const replacing = meta.source === "sample";
-      const base = replacing ? [] : cur.transactions;
-      const { merged, added, duplicates } = mergeTransactions(base, incoming);
-      const subs = redetect(merged, replacing ? cur.subscriptions.filter((x) => x.manual) : cur.subscriptions);
-      const dates = incoming.map((t) => t.date).sort();
-      const record: ImportRecord = { id, at: new Date().toISOString(), fileName: meta.fileName, format: meta.format, rows: added, duplicates, from: dates[0], to: dates[dates.length - 1] };
-      commit((s) => ({
-        ...s,
-        transactions: merged,
-        subscriptions: subs,
-        importedAt: record.at,
-        dataSource: meta.source,
-        imports: [record, ...(replacing ? [] : (s.imports ?? []))].slice(0, 20),
-      }));
-      return { record, subscriptions: subs };
-    };
+    const redetect = (txs: AppState["transactions"], previous: Subscription[]) => mergeWithPrevious(detectSubscriptions(txs, { homeCurrency: ref.current.settings.homeCurrency }), previous);
     return {
       ready,
       storage: adapter.kind,
-      mode,
       state,
-      importRows,
-      enterDemo() {
-        // Build the demo workspace from a freshly generated sample statement.
-        const settings = ref.current.settings;
-        const r = extractCsv(sampleStatementCsv(), settings.homeCurrency);
-        const id = `demo_${Date.now().toString(36)}`;
-        const txs = rowsToTransactions(r.rows, "sample", id);
-        const subs = detectSubscriptions(txs, { homeCurrency: settings.homeCurrency });
-        const dates = txs.map((t) => t.date).sort();
-        const demo: AppState = {
-          ...EMPTY,
-          settings: { ...settings, wallet: undefined, agentId: undefined, agentRegistrationTx: undefined },
-          transactions: txs,
-          subscriptions: subs,
-          importedAt: new Date().toISOString(),
-          dataSource: "sample",
-          imports: [{ id, at: new Date().toISOString(), fileName: "Demo sample statement", format: "CSV", rows: txs.length, duplicates: 0, from: dates[0], to: dates[dates.length - 1] }],
-        };
-        void switchTo("demo", demo);
-      },
-      exitDemo() {
-        void demoAdapter.clear();
-        void switchTo("user");
+      importRows(rows, meta) {
+        const cur = ref.current;
+        const id = `imp_${Date.now().toString(36)}`;
+        const incoming = rowsToTransactions(rows, meta.source, id);
+        const { merged, added, duplicates } = mergeTransactions(cur.transactions, incoming);
+        const subs = redetect(merged, cur.subscriptions);
+        const dates = incoming.map((t) => t.date).sort();
+        const record: ImportRecord = { id, at: new Date().toISOString(), fileName: meta.fileName, format: meta.format, rows: added, duplicates, from: dates[0], to: dates[dates.length - 1] };
+        commit((s) => ({ ...s, transactions: merged, subscriptions: subs, importedAt: record.at, dataSource: meta.source, imports: [record, ...(s.imports ?? [])].slice(0, 30) }));
+        return { record, subscriptions: subs };
       },
       removeImport(importId) {
         const cur = ref.current;
         const txs = cur.transactions.filter((t) => !t.id.startsWith(`${importId}-`));
-        const subs = redetect(txs, cur.subscriptions);
-        commit((s) => ({ ...s, transactions: txs, subscriptions: subs, imports: (s.imports ?? []).filter((i) => i.id !== importId) }));
-      },
-      removeSubscription(id) {
-        commit((s) => ({ ...s, subscriptions: s.subscriptions.filter((x) => x.id !== id || !x.manual) }));
+        commit((s) => ({ ...s, transactions: txs, subscriptions: redetect(txs, cur.subscriptions.filter((x) => x.manual || x.status !== "detected")), imports: (s.imports ?? []).filter((i) => i.id !== importId) }));
       },
       addManual(sub) {
         commit((s) => ({ ...s, subscriptions: [...s.subscriptions.filter((x) => x.id !== sub.id), sub] }));
+      },
+      removeSubscription(id) {
+        commit((s) => ({ ...s, subscriptions: s.subscriptions.filter((x) => x.id !== id || !x.manual) }));
       },
       updateSubscription(id, patch) {
         commit((s) => ({ ...s, subscriptions: s.subscriptions.map((x) => (x.id === id ? { ...x, ...patch } : x)) }));
@@ -198,21 +142,24 @@ export function StoreProvider({ children, userAdapter = browserStorage(USER_KEY)
       },
       upsertPayment(p) {
         commit((s) => {
-          const exists = s.payments.some((x) => x.id === p.id);
+          const existing = s.payments.find((x) => x.id === p.id);
           // Never downgrade a confirmed on-chain record.
-          if (exists && s.payments.find((x) => x.id === p.id)!.status === "confirmed" && p.status !== "confirmed") return s;
-          return { ...s, payments: exists ? s.payments.map((x) => (x.id === p.id ? p : x)) : [p, ...s.payments] };
+          if (existing?.status === "confirmed" && p.status !== "confirmed") return s;
+          return { ...s, payments: existing ? s.payments.map((x) => (x.id === p.id ? p : x)) : [p, ...s.payments] };
         });
       },
       removePayment(id) {
         commit((s) => ({ ...s, payments: s.payments.filter((x) => x.id !== id || x.status !== "prepared") }));
       },
+      logAction(a) {
+        commit((s) => ({ ...s, actions: [{ ...a, id: `act_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, at: new Date().toISOString() }, ...(s.actions ?? [])].slice(0, 100) }));
+      },
       reset() {
-        // Keep preferences and records of on-chain payments; drop imports and drafts.
+        // Keep preferences and records of on-chain payments; drop imports, bills and drafts.
         commit((s) => ({ ...EMPTY, settings: s.settings, payments: s.payments.filter((p) => p.status !== "prepared") }));
       },
     };
-  }, [ready, adapter.kind, mode, state, commit, switchTo, demoAdapter]);
+  }, [ready, adapter.kind, state, commit]);
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;
 }

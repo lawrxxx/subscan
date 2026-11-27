@@ -126,6 +126,8 @@ export interface AppState {
   dataSource?: "csv" | "pdf" | "sample" | "mono";
   /** Imports performed, newest first (metadata only — raw files are never stored). */
   imports?: ImportRecord[];
+  /** Actions the user approved from the agent workspace (newest first). */
+  actions?: AgentAction[];
 }
 
 export interface ImportRecord {
@@ -137,4 +139,13 @@ export interface ImportRecord {
   duplicates: number; // rows skipped as already imported
   from?: string;
   to?: string;
+}
+
+export interface AgentAction {
+  id: string;
+  at: string;
+  kind: "confirmed" | "dismissed" | "restored" | "recategorised" | "payment-prepared" | "payment-sent";
+  title: string;
+  detail?: string;
+  href?: string;
 }

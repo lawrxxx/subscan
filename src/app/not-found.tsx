@@ -2,13 +2,13 @@ import Link from "next/link";
 
 export default function NotFound() {
   return (
-    <div className="px-4 py-20 sm:px-8 lg:px-12 lg:py-28">
-      <div className="kicker mb-4">404</div>
-      <h1 className="display max-w-xl text-[48px] sm:text-[68px]">This page isn&rsquo;t on the statement.</h1>
-      <p className="mt-4 max-w-md text-[16px] text-muted">The link may be out of date, or the subscription was removed when you re-imported.</p>
-      <div className="mt-8 flex gap-3">
+    <div className="px-4 py-16 sm:px-6 lg:px-8">
+      <div className="label mb-3">404</div>
+      <h1 className="title max-w-xl text-[30px]">This page doesn&rsquo;t exist.</h1>
+      <p className="mt-2 max-w-md text-[14px] text-muted">The link may be out of date, or the bill was removed when you deleted an import.</p>
+      <div className="mt-6 flex gap-2">
         <Link href="/" className="btn btn-primary">Back to overview</Link>
-        <Link href="/subscriptions" className="btn btn-ghost">All subscriptions</Link>
+        <Link href="/bills" className="btn btn-ghost">All bills</Link>
       </div>
     </div>
   );

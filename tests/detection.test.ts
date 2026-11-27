@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { parseTransactionsCsv, parseDate, parseAmount } from "../src/lib/detection/csv.ts";
 import { detectSubscriptions, addPeriod } from "../src/lib/detection/engine.ts";
 import { spendSummary, duplicates, upcomingRenewals, wasteCandidates } from "../src/lib/detection/analysis.ts";
-import { sampleStatementCsv } from "../src/lib/sample.ts";
+import { sampleStatementCsv } from "./fixtures/sample-statement.ts";
 
 const TODAY = "2026-11-26";
 

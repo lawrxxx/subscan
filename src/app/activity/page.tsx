@@ -1,117 +1,276 @@
 "use client";
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import { PageHeader } from "@/components/shell";
-import { HashLink, TxStatus } from "@/components/bits";
+import { useEffect, useMemo, useState } from "react";
+import { HashLink } from "@/components/bits";
+import { Avatar, EmptyPanel, Icon, PageBar, PayStatus, UploadButton } from "@/components/ui";
+import { txCategory } from "@/lib/attention";
 import { TOKENS } from "@/lib/celo/config";
 import { useStore } from "@/lib/db/store";
-import { date } from "@/lib/format";
-import type { PaymentStatus } from "@/lib/types";
+import { date, money } from "@/lib/format";
+import type { PaymentStatus, Subscription, Transaction } from "@/lib/types";
 
-type Tab = "all" | PaymentStatus;
-const TABS: [Tab, string][] = [
-  ["all", "All"],
-  ["prepared", "Prepared"],
-  ["pending", "Pending"],
-  ["confirmed", "Confirmed"],
-  ["failed", "Failed"],
-];
+type Tab = "transactions" | "payments";
+type Dir = "all" | "debit" | "credit";
 
 export default function Activity() {
-  const { state, removePayment } = useStore();
-  const [tab, setTab] = useState<Tab>("all");
-  const counts = useMemo(() => Object.fromEntries(TABS.map(([k]) => [k, k === "all" ? state.payments.length : state.payments.filter((p) => p.status === k).length])), [state.payments]);
-  const list = state.payments.filter((p) => tab === "all" || p.status === tab);
-  const next = [...state.subscriptions].filter((s) => s.status !== "dismissed").sort((a, b) => a.nextRenewal.localeCompare(b.nextRenewal))[0];
+  const { state, ready, removePayment } = useStore();
+  const [tab, setTab] = useState<Tab>("transactions");
+  const [q, setQ] = useState("");
+  const [dir, setDir] = useState<Dir>("all");
+  const [category, setCategory] = useState("all");
+  const [month, setMonth] = useState("all");
+  const [payStatus, setPayStatus] = useState<"all" | PaymentStatus>("all");
+  const [open, setOpen] = useState<Transaction | null>(null);
+  const [limit, setLimit] = useState(100);
+
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("tab") === "payments") setTab("payments");
+  }, []);
+
+  const bills = useMemo(() => new Map<string, Subscription>(state.subscriptions.filter((s) => s.status !== "dismissed").map((s) => [s.merchant, s])), [state.subscriptions]);
+  const rows = useMemo(
+    () => [...state.transactions].sort((a, b) => b.date.localeCompare(a.date)).map((t) => ({ t, ...txCategory(t, bills) })),
+    [state.transactions, bills],
+  );
+  const categories = useMemo(() => [...new Set(rows.map((r) => r.category))].sort(), [rows]);
+  const months = useMemo(() => [...new Set(rows.map((r) => r.t.date.slice(0, 7)))], [rows]);
+  const filtered = rows.filter(
+    (r) =>
+      (dir === "all" || (r.t.direction ?? "debit") === dir) &&
+      (category === "all" || r.category === category) &&
+      (month === "all" || r.t.date.startsWith(month)) &&
+      (!q || `${r.t.description} ${r.t.merchant} ${r.category}`.toLowerCase().includes(q.toLowerCase())),
+  );
+  const totals = filtered.reduce(
+    (a, r) => {
+      const k = (r.t.direction ?? "debit") === "credit" ? "in" : "out";
+      a[k][r.t.currency] = (a[k][r.t.currency] ?? 0) + r.t.amount;
+      return a;
+    },
+    { in: {} as Record<string, number>, out: {} as Record<string, number> },
+  );
+  const payments = state.payments.filter((p) => payStatus === "all" || p.status === payStatus);
+
+  if (!ready) return null;
+  const fmt = (m: Record<string, number>) => Object.entries(m).map(([c, v]) => money(v, c)).join(" + ") || "—";
 
   return (
     <div>
-      <PageHeader kicker="Payments" title="Transaction history">
-        Every payment subscan prepared or sent from your wallet. <strong className="font-medium text-ink">Prepared</strong> means nothing was signed or broadcast;{" "}
-        <strong className="font-medium text-ink">pending</strong> is waiting for a Celo block; <strong className="font-medium text-ink">confirmed</strong> has an on-chain receipt.
-      </PageHeader>
-
-      <div className="grid grid-cols-2 border-b rule sm:grid-cols-4">
-        {(["prepared", "pending", "confirmed", "failed"] as PaymentStatus[]).map((k) => (
-          <button key={k} onClick={() => setTab(k)} className={`border-r rule px-4 py-5 text-left last:border-r-0 sm:px-8 lg:px-12 ${tab === k ? "bg-paper-2" : "hover:bg-paper-2/50"}`}>
-            <div className="kicker">{k}</div>
-            <div className="figure mt-2 text-[44px]">{counts[k]}</div>
-          </button>
-        ))}
-      </div>
-
-      <div className="px-4 py-8 sm:px-8 lg:px-12">
-        <div className="-mx-1 mb-4 flex gap-px overflow-x-auto text-[13px]" role="tablist">
-          {TABS.map(([k, l]) => (
-            <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className={`whitespace-nowrap border-b-2 px-2.5 py-1.5 ${tab === k ? "border-ink" : "border-transparent text-muted hover:text-ink"}`}>
-              {l} <span className="num text-faint">{counts[k]}</span>
-            </button>
-          ))}
+      <PageBar
+        title="Activity"
+        sub={state.transactions.length ? `${state.transactions.length} imported transactions · ${state.payments.length} payment${state.payments.length === 1 ? "" : "s"} through subscan` : "Imported transactions and payments made through subscan"}
+        actions={<UploadButton className="btn btn-ghost" />}
+      >
+        <div className="tabs mt-5" role="tablist">
+          <button role="tab" aria-selected={tab === "transactions"} onClick={() => setTab("transactions")}>Statement transactions <span className="count">{state.transactions.length}</span></button>
+          <button role="tab" aria-selected={tab === "payments"} onClick={() => setTab("payments")}>subscan payments <span className="count">{state.payments.length}</span></button>
         </div>
+      </PageBar>
 
-        {!state.payments.length ? (
-          <div className="border-t border-ink py-10">
-            <div className="display text-[28px]">No payments yet.</div>
-            <p className="mt-2 max-w-md text-[14px] text-muted">
-              Payments appear here once you prepare one. subscan never shows a transaction as confirmed without a Celo mainnet receipt.
-            </p>
-            <div className="mt-6 flex flex-wrap gap-3">
-              {next && <Link href={`/pay/${encodeURIComponent(next.id)}`} className="btn btn-primary">Prepare {next.displayName}</Link>}
-              <Link href="/agent" className="btn btn-ghost">Ask the agent</Link>
-            </div>
-          </div>
-        ) : !list.length ? (
-          <p className="border-t border-ink py-10 text-[14px] text-muted">No {tab} payments.</p>
-        ) : (
-          <ul className="border-t border-ink">
-            {list.map((p) => (
-              <li key={p.id} className="grid gap-4 border-b rule py-5 lg:grid-cols-[1.1fr_1fr_1.4fr]">
-                <div>
-                  <div className="flex items-center gap-3">
-                    <Link href={`/activity/${p.id}`} className="display text-[22px] hover:underline">{p.merchant}</Link>
-                    <TxStatus status={p.status} />
-                  </div>
-                  <div className="mt-1 text-[12px] text-muted">
-                    {date(p.createdAt.slice(0, 10))} · {new Date(p.createdAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })} · {p.method === "x402" ? "x402" : "direct transfer"}
+      <div className="px-4 sm:px-6 lg:px-8">
+        {tab === "transactions" ? (
+          <section className="panel">
+            {!rows.length ? (
+              <EmptyPanel icon="activity" title="No transactions yet" action={<UploadButton />}>Upload a bank or card statement. Only the transactions you approve during import are saved, in this browser.</EmptyPanel>
+            ) : (
+              <>
+                <div className="flex flex-col gap-2 border-b rule px-3 py-2.5 lg:flex-row lg:items-center">
+                  <label className="relative flex-1">
+                    <Icon name="search" size={15} className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-faint" />
+                    <input className="input pl-8" placeholder="Search merchant or description" value={q} onChange={(e) => { setQ(e.target.value); setLimit(100); }} aria-label="Search transactions" />
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    <div className="seg" role="group" aria-label="Direction">
+                      {([["all", "All"], ["debit", "Money out"], ["credit", "Money in"]] as [Dir, string][]).map(([k, l]) => (
+                        <button key={k} aria-pressed={dir === k} onClick={() => setDir(k)}>{l}</button>
+                      ))}
+                    </div>
+                    <select className="input w-auto" value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Category">
+                      <option value="all">All categories</option>
+                      {categories.map((c) => <option key={c}>{c}</option>)}
+                    </select>
+                    <select className="input w-auto" value={month} onChange={(e) => setMonth(e.target.value)} aria-label="Month">
+                      <option value="all">All months</option>
+                      {months.map((m) => <option key={m} value={m}>{new Date(`${m}-01T00:00:00Z`).toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" })}</option>)}
+                    </select>
                   </div>
                 </div>
-                <dl className="grid grid-cols-2 gap-x-4 text-[13px]">
-                  <div>
-                    <dt className="text-[11px] uppercase tracking-[0.1em] text-muted">From</dt>
-                    <dd className="num mt-0.5">{p.sourceAmount} {TOKENS[p.sourceToken].display}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-[11px] uppercase tracking-[0.1em] text-muted">Merchant gets</dt>
-                    <dd className="num mt-0.5">{p.destinationAmount} {TOKENS[p.destinationToken].display}</dd>
-                  </div>
-                </dl>
-                <div>
-                  <ol className="space-y-1.5">
-                    {p.steps.map((s, i) => (
-                      <li key={i} className="flex items-center justify-between gap-3 text-[13px]">
-                        <span className="min-w-0 truncate text-ink-2">
-                          <span className="mr-2 text-[11px] uppercase tracking-[0.08em] text-muted">{s.kind}</span>
-                          {s.hash ? <HashLink hash={s.hash} n={4} /> : <span className="text-faint">not broadcast</span>}
-                        </span>
-                        <TxStatus status={s.status} />
-                      </li>
-                    ))}
-                  </ol>
-                  <div className="mt-3 flex gap-4 text-[12px]">
-                    <Link href={`/activity/${p.id}`} className="link">Receipt</Link>
-                    {p.status === "prepared" && (
-                      <>
-                        <Link href={`/pay/${encodeURIComponent(p.subscriptionId)}`} className="link">Continue to approval</Link>
-                        <button className="text-alert link" onClick={() => removePayment(p.id)}>Discard draft</button>
-                      </>
+                <div className="flex flex-wrap gap-x-6 gap-y-1 border-b rule bg-paper-2/40 px-4 py-2 text-[12.5px] text-muted">
+                  <span><span className="num text-ink">{filtered.length}</span> shown</span>
+                  <span>Out <span className="num text-ink">{fmt(totals.out)}</span></span>
+                  <span>In <span className="num text-accent">{fmt(totals.in)}</span></span>
+                </div>
+                {!filtered.length ? (
+                  <EmptyPanel icon="search" title="No transactions match these filters" />
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="tbl">
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Description</th>
+                          <th className="hidden md:table-cell">Category</th>
+                          <th className="hidden sm:table-cell">Status</th>
+                          <th className="r">Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filtered.slice(0, limit).map(({ t, category: cat, bill }) => {
+                          const credit = (t.direction ?? "debit") === "credit";
+                          return (
+                            <tr key={t.id} data-href onClick={() => setOpen(t)}>
+                              <td className="num whitespace-nowrap text-muted">{date(t.date)}</td>
+                              <td>
+                                <div className="flex min-w-0 items-center gap-2.5">
+                                  <Avatar name={bill?.displayName ?? t.merchant} size={28} />
+                                  <div className="min-w-0">
+                                    <div className="max-w-[46vw] truncate font-medium sm:max-w-[340px]">{bill?.displayName ?? t.merchant}</div>
+                                    <div className="max-w-[46vw] truncate text-[12px] text-muted sm:max-w-[340px]">{t.description}</div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="hidden md:table-cell">
+                                <span className="text-ink-2">{cat}</span>
+                                {bill && <span className="ml-1.5 tag">Bill</span>}
+                              </td>
+                              <td className="hidden sm:table-cell"><span className="pill pill-plain">Posted</span></td>
+                              <td className={`r num whitespace-nowrap ${credit ? "text-accent" : ""}`}>{credit ? "+" : "−"}{money(t.amount, t.currency)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                    {filtered.length > limit && (
+                      <div className="border-t rule px-4 py-3 text-center">
+                        <button className="btn btn-ghost btn-sm" onClick={() => setLimit((l) => l + 200)}>Show more ({filtered.length - limit} left)</button>
+                      </div>
                     )}
                   </div>
-                </div>
-              </li>
-            ))}
-          </ul>
+                )}
+              </>
+            )}
+          </section>
+        ) : (
+          <section className="panel">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b rule px-3 py-2.5">
+              <div className="seg" role="group" aria-label="Payment status">
+                {([["all", "All"], ["prepared", "Drafts"], ["pending", "Processing"], ["confirmed", "Paid"], ["failed", "Failed"]] as ["all" | PaymentStatus, string][]).map(([k, l]) => (
+                  <button key={k} aria-pressed={payStatus === k} onClick={() => setPayStatus(k)}>{l}</button>
+                ))}
+              </div>
+              <span className="text-[12px] text-muted">Paid means a Celo mainnet receipt exists for every step.</span>
+            </div>
+            {!state.payments.length ? (
+              <EmptyPanel icon="wallet" title="No payments yet" action={<Link href="/bills" className="btn btn-ghost">Choose a bill to pay</Link>}>
+                Payments appear here once you prepare one from a bill. Nothing is shown as paid without an on-chain receipt.
+              </EmptyPanel>
+            ) : !payments.length ? (
+              <EmptyPanel icon="search" title="No payments with this status" />
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="tbl">
+                  <thead>
+                    <tr>
+                      <th>Created</th>
+                      <th>Payee</th>
+                      <th className="hidden md:table-cell">You send</th>
+                      <th className="r">Recipient gets</th>
+                      <th className="hidden lg:table-cell">Transactions</th>
+                      <th>Status</th>
+                      <th className="r"><span className="sr-only">Actions</span></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {payments.map((p) => (
+                      <tr key={p.id}>
+                        <td className="num whitespace-nowrap text-muted">{date(p.createdAt.slice(0, 10))}</td>
+                        <td>
+                          <Link href={`/activity/${p.id}`} className="font-medium hover:underline">{p.merchant}</Link>
+                          <div className="text-[12px] text-muted">{p.method === "x402" ? "x402" : "Direct transfer"}{p.sourceToken !== p.destinationToken ? " · Textile FX" : ""}</div>
+                        </td>
+                        <td className="hidden num whitespace-nowrap md:table-cell">{p.sourceAmount} {TOKENS[p.sourceToken].display}</td>
+                        <td className="r num whitespace-nowrap">{p.destinationAmount} {TOKENS[p.destinationToken].display}</td>
+                        <td className="hidden lg:table-cell">
+                          <div className="flex flex-col gap-0.5">
+                            {p.steps.filter((s) => s.hash).map((s, i) => <span key={i} className="text-[12px]"><span className="text-muted capitalize">{s.kind}</span> <HashLink hash={s.hash!} n={4} /></span>)}
+                            {!p.steps.some((s) => s.hash) && <span className="text-[12px] text-faint">Not broadcast</span>}
+                          </div>
+                        </td>
+                        <td><PayStatus status={p.status} /></td>
+                        <td className="r whitespace-nowrap">
+                          {p.status === "prepared" ? (
+                            <span className="inline-flex gap-1.5">
+                              <Link href={`/pay/${encodeURIComponent(p.subscriptionId)}`} className="btn btn-primary btn-sm">Review</Link>
+                              <button className="btn btn-quiet btn-sm" onClick={() => removePayment(p.id)}>Discard</button>
+                            </span>
+                          ) : (
+                            <Link href={`/activity/${p.id}`} className="btn btn-ghost btn-sm">Receipt</Link>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
         )}
       </div>
+
+      {open && <TxDrawer t={open} bills={bills} onClose={() => setOpen(null)} />}
+    </div>
+  );
+}
+
+function TxDrawer({ t, bills, onClose }: { t: Transaction; bills: Map<string, Subscription>; onClose(): void }) {
+  const { state } = useStore();
+  const { category, bill } = txCategory(t, bills);
+  const imp = state.imports?.find((i) => t.id.startsWith(i.id) || (i.from && i.to && t.date >= i.from && t.date <= i.to));
+  const credit = (t.direction ?? "debit") === "credit";
+  const sameMerchant = state.transactions.filter((x) => x.merchant === t.merchant && x.id !== t.id).length;
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, [onClose]);
+  return (
+    <div className="fixed inset-0 z-40 flex justify-end bg-ink/20" onClick={onClose} role="dialog" aria-modal aria-label="Transaction details">
+      <aside className="flex h-full w-full max-w-md flex-col overflow-y-auto border-l rule bg-surface shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b rule px-5 py-3">
+          <span className="label">Transaction</span>
+          <button className="btn btn-quiet btn-sm" onClick={onClose} aria-label="Close"><Icon name="close" size={16} /></button>
+        </div>
+        <div className="px-5 py-6">
+          <div className="flex items-center gap-3">
+            <Avatar name={bill?.displayName ?? t.merchant} size={40} />
+            <div className="min-w-0">
+              <div className="truncate text-[16px] font-semibold">{bill?.displayName ?? t.merchant}</div>
+              <div className="text-[13px] text-muted">{date(t.date, "long")}</div>
+            </div>
+          </div>
+          <div className={`figure mt-6 text-[34px] ${credit ? "text-accent" : ""}`}>{credit ? "+" : "−"}{money(t.amount, t.currency)}</div>
+          <dl className="mt-6 divide-y divide-[var(--color-rule)] border-y rule text-[13.5px]">
+            {[
+              ["Statement description", t.description],
+              ["Direction", credit ? "Money in" : "Money out"],
+              ["Category", category],
+              ["Currency", t.currency],
+              ["Status", "Posted on statement"],
+              ["Source", `${t.source.toUpperCase()} import${imp ? ` · ${imp.fileName}` : ""}`],
+            ].map(([k, v]) => (
+              <div key={k} className="flex justify-between gap-4 py-2.5"><dt className="shrink-0 text-muted">{k}</dt><dd className="text-right break-words">{v}</dd></div>
+            ))}
+          </dl>
+          {bill ? (
+            <Link href={`/bills/${encodeURIComponent(bill.id)}`} className="mt-5 flex items-center justify-between rounded-[6px] border rule px-4 py-3 text-[13.5px] hover:bg-paper-2">
+              <span>Part of <strong className="font-semibold">{bill.displayName}</strong> · {bill.chargeCount} charges</span>
+              <Icon name="arrow" size={15} />
+            </Link>
+          ) : (
+            !credit && sameMerchant > 0 && <p className="mt-5 text-[13px] text-muted">{sameMerchant} other transaction{sameMerchant === 1 ? "" : "s"} from this merchant. Not regular enough to count as a bill.</p>
+          )}
+        </div>
+      </aside>
     </div>
   );
 }

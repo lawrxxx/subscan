@@ -7,11 +7,11 @@ export default function ErrorPage({ error, reset }: { error: Error & { digest?: 
     console.error(error);
   }, [error]);
   return (
-    <div className="px-4 py-20 sm:px-8 lg:px-12">
-      <div className="kicker mb-4 text-alert">Something went wrong</div>
-      <h1 className="display max-w-xl text-[44px]">This page hit an error.</h1>
+    <div className="px-4 py-16 sm:px-6 lg:px-8">
+      <div className="label mb-3 text-alert">Something went wrong</div>
+      <h1 className="title max-w-xl text-[30px]">This page hit an error.</h1>
       <p className="mt-3 max-w-md text-[14px] text-muted">{error.message || "An unexpected error occurred."}{error.digest ? ` (ref ${error.digest})` : ""}</p>
-      <div className="mt-8 flex gap-3">
+      <div className="mt-6 flex gap-2">
         <button className="btn btn-primary" onClick={reset}>Try again</button>
         <Link href="/" className="btn btn-ghost">Overview</Link>
       </div>

@@ -16,6 +16,7 @@ import { otherToken, planPayment } from "@/lib/payments/plan";
 import { formatRate, type PreviewData } from "@/lib/textile/client";
 import type { PaymentRecord, PaymentStep } from "@/lib/types";
 import { HashLink, TxStatus } from "@/components/bits";
+import { Icon } from "@/components/ui";
 import { useWallet } from "@/components/wallet";
 
 const fmt = (atomic: string | bigint, t: TokenSymbol, dp = t === "cNGN" ? 2 : 4) =>
@@ -23,7 +24,7 @@ const fmt = (atomic: string | bigint, t: TokenSymbol, dp = t === "cNGN" ? 2 : 4)
 
 export default function Pay() {
   const { id } = useParams<{ id: string }>();
-  const { state, ready, upsertPayment, mode } = useStore();
+  const { state, ready, upsertPayment, logAction } = useStore();
   const w = useWallet();
   const sub = state.subscriptions.find((s) => s.id === decodeURIComponent(id));
 
@@ -77,7 +78,7 @@ export default function Pay() {
   const [err, setErr] = useState<string>();
 
   if (!ready) return null;
-  if (!sub || !plan) return <Missing what="subscription" back="/subscriptions" backLabel="All subscriptions" />;
+  if (!sub || !plan) return <Missing what="subscription" back="/bills" backLabel="All bills" />;
 
   const srcTok = plan.sourceToken!;
   const dstTok = plan.destinationToken;
@@ -86,7 +87,6 @@ export default function Pay() {
   const insufficient = needSource !== null && haveSource !== null && haveSource < needSource;
   const noLiquidity = plan.needsConversion && preview?.status === "no_quote";
   const blockers = [
-    ...(mode === "demo" ? ["Demo mode: this bill comes from sample data. Exit demo mode to pay your own bills."] : []),
     ...plan.problems,
     ...(x402Err ? [x402Err] : []),
     ...(!w.address ? ["Connect a Celo wallet to continue."] : []),
@@ -124,6 +124,7 @@ export default function Pay() {
       from: w.address,
     });
     setDraftSaved(true);
+    logAction({ kind: "payment-prepared", title: `Prepared payment to ${sub.displayName}`, detail: `${fmt(destAtomic, dstTok)} ${TOKENS[dstTok].display} · not signed`, href: "/activity?tab=payments" });
   }
 
   async function run() {
@@ -203,6 +204,7 @@ export default function Pay() {
       }
       step("settlement", { status: "confirmed" });
       save({ status: "confirmed" });
+      logAction({ kind: "payment-sent", title: `Paid ${sub!.displayName}`, detail: `${rec.destinationAmount} ${TOKENS[dstTok].display} confirmed on Celo`, href: `/activity/${rec.id}` });
       void w.refresh();
     } catch (e) {
       const msg = e instanceof Error ? (e as { shortMessage?: string }).shortMessage ?? e.message : String(e);
@@ -217,100 +219,136 @@ export default function Pay() {
   const receive = plan.needsConversion && preview?.buyAmount ? preview.buyAmount : destAtomic;
   const rate = preview?.takerPays && preview.buyAmount && dstTok ? formatRate(srcTok, dstTok, preview.takerPays, preview.buyAmount) : null;
 
+  const sendAmt = plan.needsConversion ? (preview?.takerPays ? fmt(preview.takerPays, srcTok) : null) : destAtomic && dstTok ? fmt(destAtomic, dstTok) : null;
+  const locked = running || !!record;
+
   return (
-    <div>
-      <div className="border-b rule px-4 py-4 text-[13px] sm:px-8 lg:px-12">
-        <Link href="/subscriptions" className="text-muted link">Subscriptions</Link> <span className="text-faint">/</span>{" "}
-        <Link href={`/subscriptions/${encodeURIComponent(sub.id)}`} className="text-muted link">{sub.displayName}</Link> <span className="text-faint">/</span> Payment
+    <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+      <div className="mb-4 text-[13px]">
+        <Link href="/bills" className="text-muted link">Bills</Link> <span className="text-faint">/</span>{" "}
+        <Link href={`/bills/${encodeURIComponent(sub.id)}`} className="text-muted link">{sub.displayName}</Link> <span className="text-faint">/</span> Pay
       </div>
 
-      <div className="grid lg:grid-cols-[1fr_420px]">
-        <section className="px-4 py-10 sm:px-8 lg:border-r lg:rule lg:px-12">
-          <div className="kicker mb-3">Payment review · Celo mainnet</div>
-          <h1 className="display text-[40px] sm:text-[56px]">Pay {sub.displayName}</h1>
-          <p className="mt-2 text-[14px] text-muted">Renewal {date(sub.nextRenewal)} · {money(sub.amount, sub.currency)} {sub.frequency}</p>
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
+        <section className="min-w-0">
+          <h1 className="title text-[28px] sm:text-[32px]">Pay {sub.displayName}</h1>
+          <p className="mt-1 text-[13.5px] text-muted">{sub.category} · {money(sub.amount, sub.currency)} {sub.frequency} · next due {date(sub.nextRenewal)}</p>
 
-          {/* Statement-style breakdown */}
-          <div className="mt-10 max-w-2xl border-t-2 border-ink">
-            <Row k="Merchant receives" v={destAtomic && dstTok ? `${fmt(destAtomic, dstTok)} ${TOKENS[dstTok].display}` : "—"} strong />
-            <Row
-              k="Paid to"
-              v={recipient ? <a href={addressUrl(recipient)} target="_blank" rel="noreferrer" className="font-mono text-[12px] link break-all">{recipient}</a> : <span className="text-alert">No verified recipient</span>}
-              note={plan.method === "x402" ? "From the merchant's x402 payment requirement" : sub.payment?.note}
-            />
-            <Row k="Settlement method" v={plan.method === "x402" ? `x402 (${x402?.req.method === "permit2" ? "Permit2" : "EIP-3009"})` : plan.method === "address" ? "Direct token transfer" : "—"} />
-            <div className="border-b rule py-4">
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-[14px] text-muted">Pay from</span>
-                <div className="flex gap-px">
+          <div className="panel mt-5 max-w-2xl">
+            {/* You send */}
+            <div className="px-4 py-4 sm:px-5">
+              <div className="flex items-center justify-between gap-3">
+                <span className="label">You send</span>
+                <div className="seg" role="group" aria-label="Pay from">
                   {(["USDT", "cNGN"] as TokenSymbol[]).map((t) => (
-                    <button key={t} disabled={running || !!record} onClick={() => setSource(t)} className={`border px-3 py-1 text-[13px] ${source === t ? "border-ink bg-ink text-paper" : "rule text-muted"}`}>
-                      {TOKENS[t].display}
-                    </button>
+                    <button key={t} aria-pressed={source === t} disabled={locked} onClick={() => setSource(t)}>{TOKENS[t].display}</button>
                   ))}
                 </div>
               </div>
-              {w.balances && <div className="mt-1 text-right text-[12px] text-muted num">Wallet: {Number(w.balances[srcTok]).toLocaleString("en-US", { maximumFractionDigits: 4 })} {TOKENS[srcTok].display}</div>}
+              <div className="mt-2 flex items-baseline justify-between gap-3">
+                <span className="figure text-[30px] sm:text-[34px]">{sendAmt ?? (previewErr ? "—" : "…")}</span>
+                <span className="text-[15px] font-medium">{TOKENS[srcTok].display}</span>
+              </div>
+              <div className="mt-1 text-[12px] text-muted num">
+                {w.balances ? <>Balance {Number(w.balances[srcTok]).toLocaleString("en-US", { maximumFractionDigits: 4 })} {TOKENS[srcTok].display}{insufficient && <span className="text-alert"> · not enough</span>}</> : "Connect a wallet to see your balance"}
+              </div>
             </div>
-            {plan.needsConversion ? (
-              <>
-                <Row k="Conversion" v={`${TOKENS[srcTok].display} → ${dstTok ? TOKENS[dstTok].display : ""} · Textile FX`} />
-                <Row k="Exchange rate" v={rate ? rate : previewErr ? <span className="text-alert">{previewErr}</span> : "Fetching…"} note="Indicative. The firm rate is locked when you approve and holds ~60 seconds." />
-                <Row k="Textile FX fee" v={preview?.feeAmount ? `${fmt(preview.feeAmount, srcTok)} ${TOKENS[srcTok].display}` : "—"} note="Protocol taker fee, included in the amount you pay" />
-                <Row k="Converted amount received" v={receive && dstTok ? `${fmt(receive, dstTok)} ${TOKENS[dstTok].display}` : "—"} />
-                <Row k="You pay" v={preview?.takerPays ? `${fmt(preview.takerPays, srcTok)} ${TOKENS[srcTok].display}` : "—"} strong />
-              </>
-            ) : (
-              <Row k="You pay" v={destAtomic && dstTok ? `${fmt(destAtomic, dstTok)} ${TOKENS[dstTok].display}` : "—"} strong note="No conversion needed" />
-            )}
-            <Row k="Attribution" v={ATTRIBUTION_CODES.join(", ")} note={plan.method === "x402" ? "ERC-8021 tag on subscan-sent transactions. x402 settlements are submitted by the facilitator and are not tagged yet." : "ERC-8021 tag appended to each transaction's calldata"} />
-            <Row k="Network fee" v={state.settings.payGasInUsdt ? "Paid in USD₮ (fee abstraction)" : "Paid in CELO"} note={w.balances ? `CELO balance ${Number(w.balances.CELO).toFixed(4)}` : undefined} />
+
+            {/* Rate strip */}
+            <div className="relative border-y rule bg-paper-2/50 px-4 py-3 text-[13px] sm:px-5">
+              {plan.needsConversion ? (
+                <ul className="space-y-1.5">
+                  <li className="flex justify-between gap-3"><span className="text-muted">Exchange rate <span className="text-faint">· indicative, refreshes every 20s</span></span><span className="num text-right">{rate ?? (previewErr ? <span className="text-alert">{previewErr}</span> : "Fetching…")}</span></li>
+                  <li className="flex justify-between gap-3"><span className="text-muted">Textile FX fee <span className="text-faint">· included</span></span><span className="num">{preview?.feeAmount ? `${fmt(preview.feeAmount, srcTok)} ${TOKENS[srcTok].display}` : "—"}</span></li>
+                  <li className="flex justify-between gap-3"><span className="text-muted">Network fee</span><span>{state.settings.payGasInUsdt ? "Small, paid in USD₮" : "Small, paid in CELO"}</span></li>
+                </ul>
+              ) : (
+                <ul className="space-y-1.5">
+                  <li className="flex justify-between gap-3"><span className="text-muted">Conversion</span><span>None — same token</span></li>
+                  <li className="flex justify-between gap-3"><span className="text-muted">Network fee</span><span>{state.settings.payGasInUsdt ? "Small, paid in USD₮" : "Small, paid in CELO"}</span></li>
+                </ul>
+              )}
+            </div>
+
+            {/* Recipient gets */}
+            <div className="px-4 py-4 sm:px-5">
+              <span className="label">{sub.displayName} gets</span>
+              <div className="mt-2 flex items-baseline justify-between gap-3">
+                <span className="figure text-[30px] sm:text-[34px]">{receive && dstTok ? fmt(receive, dstTok) : "—"}</span>
+                <span className="text-[15px] font-medium">{dstTok ? TOKENS[dstTok].display : ""}</span>
+              </div>
+              {plan.needsConversion && destAtomic && dstTok && <div className="mt-1 text-[12px] text-muted">Bill amount {fmt(destAtomic, dstTok)} {TOKENS[dstTok].display}. The firm quote must cover it in full or nothing is sent.</div>}
+            </div>
           </div>
-          <p className="mt-4 max-w-2xl text-[12px] text-muted">
-            Conversion and merchant settlement are separate transactions. If the conversion succeeds and settlement fails, the converted {dstTok} stays in your wallet.
+
+          <div className="panel mt-4 max-w-2xl">
+            <div className="panel-head"><h2 className="panel-title">Payment details</h2></div>
+            <dl className="text-[13px]">
+              <D k="Purpose">{sub.displayName} · {sub.frequency} {sub.kind === "utility" ? "utility bill" : sub.kind === "obligation" ? "payment" : "subscription"}</D>
+              <D k="Recipient" note={plan.method === "x402" ? "From the merchant's x402 payment requirement" : sub.payment?.verifiedAt ? `Verified by you ${date(sub.payment.verifiedAt.slice(0, 10))}` : sub.payment?.note}>
+                {recipient ? <a href={addressUrl(recipient)} target="_blank" rel="noreferrer" className="font-mono text-[12px] link break-all">{recipient}</a> : <span className="text-alert">No verified recipient</span>}
+              </D>
+              <D k="Method">{plan.method === "x402" ? `x402 (${x402?.req.method === "permit2" ? "Permit2" : "EIP-3009"})` : plan.method === "address" ? "Direct token transfer" : "—"}</D>
+              <D k="Source token">{TOKENS[srcTok].display}</D>
+              <D k="Destination token">{dstTok ? TOKENS[dstTok].display : "—"}</D>
+              {plan.needsConversion && <D k="Conversion">Textile FX RFQ · firm quote locked at approval, valid about 60 seconds</D>}
+              <D k="Network">Celo mainnet · chain 42220</D>
+              <D k="Attribution" note={plan.method === "x402" ? "x402 settlements are submitted by the facilitator and are not tagged." : "ERC-8021 builder codes appended to each transaction"}><span className="font-mono text-[12px]">{ATTRIBUTION_CODES.join(", ")}</span></D>
+            </dl>
+          </div>
+          <p className="mt-3 max-w-2xl text-[12px] text-muted">
+            Conversion and settlement are separate transactions. If conversion succeeds and settlement fails, the converted {dstTok ? TOKENS[dstTok].display : "tokens"} stay in your wallet.
           </p>
         </section>
 
-        <aside className="bg-paper-2/60 px-4 py-10 sm:px-8 lg:px-8">
+        <aside className="lg:sticky lg:top-6 lg:self-start">
           {!record ? (
-            <>
-              <div className="kicker mb-4">Authorise</div>
-              {blockers.length > 0 && (
-                <ul className="mb-6 space-y-2 border-l-2 border-alert pl-3 text-[13px] text-alert">
-                  {blockers.map((b) => <li key={b}>{b}</li>)}
-                </ul>
-              )}
-              {!w.address ? (
-                <button className="btn btn-primary w-full" onClick={w.connect} disabled={w.connecting}>{w.connecting ? "Connecting…" : "Connect wallet"}</button>
-              ) : !w.onCelo ? (
-                <button className="btn btn-primary w-full" onClick={w.switchToCelo}>Switch to Celo</button>
-              ) : (
-                <>
-                  <ol className="mb-6 space-y-3 text-[13px]">
-                    {plan.needsConversion && <li className="grid grid-cols-[22px_1fr]"><span className="num text-faint">1</span><span>Request a firm Textile FX quote bound to your wallet{" "}<span className="text-muted">(may ask you to sign a no-cost proof of control)</span></span></li>}
-                    {plan.needsConversion && <li className="grid grid-cols-[22px_1fr]"><span className="num text-faint">2</span><span>Approve the Textile reactor for the exact amount, if needed</span></li>}
-                    {plan.needsConversion && <li className="grid grid-cols-[22px_1fr]"><span className="num text-faint">3</span><span>Send the conversion transaction</span></li>}
-                    <li className="grid grid-cols-[22px_1fr]"><span className="num text-faint">{plan.needsConversion ? 4 : 1}</span><span>{plan.method === "x402" ? "Sign the x402 payment authorisation" : "Send the merchant transfer"}</span></li>
-                  </ol>
-                  <label className="mb-5 flex items-start gap-3 text-[13px]">
-                    <input type="checkbox" className="mt-1 accent-[var(--color-accent)]" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
-                    <span>I authorise these Celo mainnet transactions from {w.address.slice(0, 6)}…{w.address.slice(-4)}. They cannot be reversed.</span>
-                  </label>
-                  <button className="btn btn-primary w-full" disabled={!canRun} onClick={run}>Approve and pay</button>
-                </>
-              )}
-              {w.error && <p className="mt-3 text-[12px] text-alert">{w.error}</p>}
-              {!w.hasProvider && !w.address && <p className="mt-3 text-[12px] text-muted">No browser wallet detected. Open subscan in MiniPay or a browser with MetaMask, Valora or Rabby.</p>}
-              {!recipient && (
-                <Link href={`/subscriptions/${encodeURIComponent(sub.id)}#settlement`} className="btn btn-ghost mt-3 w-full bg-paper">Add merchant payment details</Link>
-              )}
-              <div className="mt-8 border-t rule pt-5">
-                <div className="mb-1 text-[13px] font-medium">Not ready to pay?</div>
-                <p className="mb-3 text-[12px] text-muted">Save this as a prepared payment. Nothing is signed or broadcast; it appears in your history as Prepared.</p>
-                <button className="btn btn-ghost w-full bg-paper" disabled={!destAtomic || !dstTok || draftSaved} onClick={saveDraft}>{draftSaved ? "Saved to payments" : "Save as prepared payment"}</button>
-                {draftSaved && <Link href="/activity" className="mt-2 block text-center text-[12px] link">View in payments →</Link>}
+            <div className="panel">
+              <div className="panel-head"><h2 className="panel-title">Review and approve</h2></div>
+              <div className="px-4 py-4 sm:px-5">
+                {blockers.length > 0 && (
+                  <div className="mb-4 rounded-[6px] bg-alert-wash px-3 py-2.5">
+                    <div className="text-[12.5px] font-medium text-alert">Before you can pay</div>
+                    <ul className="mt-1 space-y-1 text-[12.5px] text-alert">{blockers.map((b) => <li key={b}>· {b}</li>)}</ul>
+                  </div>
+                )}
+                {!w.address ? (
+                  <>
+                    <button className="btn btn-primary w-full" onClick={w.connect} disabled={w.connecting}>{w.connecting ? "Connecting…" : "Connect wallet"}</button>
+                    {!w.hasProvider && <p className="mt-2 text-[12px] text-muted">No browser wallet found. Open subscan in MiniPay, or use MetaMask, Valora or Rabby.</p>}
+                  </>
+                ) : !w.onCelo ? (
+                  <button className="btn btn-primary w-full" onClick={w.switchToCelo}>Switch to Celo mainnet</button>
+                ) : (
+                  <>
+                    <div className="label mb-2">Your wallet will ask you to</div>
+                    <ol className="mb-4 space-y-2 text-[13px]">
+                      {[
+                        ...(plan.needsConversion ? ["Sign a no-cost proof for a firm Textile FX quote", `Approve the exact ${TOKENS[srcTok].display} amount, if needed`, "Send the conversion"] : []),
+                        plan.method === "x402" ? "Sign the x402 payment authorisation" : `Send ${dstTok ? TOKENS[dstTok].display : ""} to the recipient`,
+                      ].map((t, i) => (
+                        <li key={t} className="grid grid-cols-[20px_1fr]"><span className="num text-faint">{i + 1}</span><span>{t}</span></li>
+                      ))}
+                    </ol>
+                    <label className="mb-4 flex items-start gap-2.5 rounded-[6px] border rule px-3 py-2.5 text-[12.5px]">
+                      <input type="checkbox" className="mt-0.5 accent-[var(--color-accent)]" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
+                      <span>I authorise these Celo mainnet transactions from {w.address.slice(0, 6)}…{w.address.slice(-4)}. They can&rsquo;t be reversed.</span>
+                    </label>
+                    <button className="btn btn-primary btn-lg w-full" disabled={!canRun} onClick={run}>
+                      {sendAmt ? `Approve and pay ${sendAmt} ${TOKENS[srcTok].display}` : "Approve and pay"}
+                    </button>
+                  </>
+                )}
+                {w.error && <p className="mt-2 text-[12px] text-alert">{w.error}</p>}
+                {!recipient && <Link href={`/bills/${encodeURIComponent(sub.id)}#settlement`} className="btn btn-ghost mt-3 w-full">Add recipient details</Link>}
               </div>
-            </>
+              <div className="border-t rule px-4 py-4 sm:px-5">
+                <div className="text-[13px] font-medium">Not ready yet?</div>
+                <p className="mt-0.5 mb-3 text-[12px] text-muted">Save a draft. Nothing is signed or sent; it shows in Activity as a draft.</p>
+                <button className="btn btn-ghost w-full" disabled={!destAtomic || !dstTok || draftSaved} onClick={saveDraft}>{draftSaved ? "Draft saved" : "Save as draft"}</button>
+                {draftSaved && <Link href="/activity?tab=payments" className="mt-2 block text-center text-[12px] link">View in Activity</Link>}
+              </div>
+            </div>
           ) : (
             <Progress record={record} running={running} err={err} />
           )}
@@ -320,46 +358,52 @@ export default function Pay() {
   );
 }
 
-function Row({ k, v, note, strong }: { k: string; v: React.ReactNode; note?: string; strong?: boolean }) {
+function D({ k, note, children }: { k: string; note?: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-start justify-between gap-6 border-b rule py-4">
-      <div>
-        <div className="text-[14px] text-muted">{k}</div>
-        {note && <div className="mt-0.5 max-w-xs text-[11px] text-faint">{note}</div>}
-      </div>
-      <div className={`num max-w-[60%] text-right ${strong ? "display text-[26px]" : "text-[14px]"}`}>{v}</div>
+    <div className="flex items-start justify-between gap-6 border-b rule-soft px-4 py-2.5 last:border-b-0 sm:px-5">
+      <dt className="shrink-0 text-muted">{k}{note && <div className="mt-0.5 max-w-[220px] text-[11px] text-faint">{note}</div>}</dt>
+      <dd className="min-w-0 text-right">{children}</dd>
     </div>
   );
 }
 
 function Progress({ record, running, err }: { record: PaymentRecord; running: boolean; err?: string }) {
+  const head =
+    record.status === "confirmed"
+      ? { tone: "bg-accent-wash text-accent", icon: "check", title: "Payment confirmed", body: `${record.destinationAmount} ${TOKENS[record.destinationToken].display} reached ${record.merchant}. Every step has a Celo mainnet receipt.` }
+      : record.status === "failed"
+        ? { tone: "bg-alert-wash text-alert", icon: "alert", title: "Payment failed", body: err ?? "A step failed. Anything already confirmed stays on chain." }
+        : { tone: "bg-info-wash text-info", icon: "clock", title: "Processing", body: "Confirm each step in your wallet and keep this page open. Nothing is marked paid until its receipt is on chain." };
   return (
-    <div>
-      <div className="mb-4 flex items-center justify-between">
-        <div className="kicker">Transactions</div>
-        <TxStatus status={record.status} />
+    <div className="panel">
+      <div className={`flex items-start gap-3 px-4 py-4 sm:px-5 ${head.tone}`}>
+        <Icon name={head.icon} size={20} className={running ? "animate-pulse" : ""} />
+        <div>
+          <div className="text-[15px] font-semibold">{head.title}</div>
+          <p className="mt-0.5 text-[12.5px] opacity-90">{head.body}</p>
+        </div>
       </div>
-      <ol className="border-t border-ink">
-        {record.steps.map((s) => (
-          <li key={s.kind} className="border-b rule py-3.5">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-[14px]">{s.label}</span>
-              <TxStatus status={s.status} />
+      <ol>
+        {record.steps.map((s, i) => (
+          <li key={s.kind} className="grid grid-cols-[22px_1fr] gap-1 border-t rule px-4 py-3 sm:px-5">
+            <span className="num pt-0.5 text-[12px] text-faint">{i + 1}</span>
+            <div className="min-w-0">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[13px]">{s.label}</span>
+                <TxStatus status={s.status} />
+              </div>
+              {s.hash && <div className="mt-1"><HashLink hash={s.hash} /></div>}
+              {s.error && <div className="mt-1 text-[12px] text-alert break-words">{s.error}</div>}
             </div>
-            {s.hash && <div className="mt-1"><HashLink hash={s.hash} /></div>}
-            {s.error && <div className="mt-1 text-[12px] text-alert">{s.error}</div>}
           </li>
         ))}
       </ol>
-      {running && <p className="mt-4 text-[13px] text-muted">Confirm each step in your wallet. Keep this page open.</p>}
-      {err && <p className="mt-4 text-[13px] text-alert">{err}</p>}
       {!running && (
-        <div className="mt-6 flex gap-3">
-          <Link href={`/activity/${record.id}`} className="btn btn-primary">View receipt</Link>
-          <Link href="/" className="btn btn-ghost">Overview</Link>
+        <div className="flex gap-2 border-t rule px-4 py-3 sm:px-5">
+          <Link href={`/activity/${record.id}`} className="btn btn-primary btn-sm">View receipt</Link>
+          <Link href="/" className="btn btn-ghost btn-sm">Overview</Link>
         </div>
       )}
     </div>
   );
 }
-

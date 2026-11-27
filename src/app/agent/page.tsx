@@ -1,25 +1,25 @@
 "use client";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
-import { useStore } from "@/lib/db/store";
-import { money } from "@/lib/format";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { attentionItems, dueIn } from "@/lib/attention";
+import { TOKENS } from "@/lib/celo/config";
+import { income, savingsPotential, upcomingRenewals } from "@/lib/detection/analysis";
+import { useRates, useStore } from "@/lib/db/store";
+import { date, money } from "@/lib/format";
 import type { AppState } from "@/lib/types";
 import { Markdown } from "@/components/bits";
+import { Avatar, EmptyPanel, Icon, PageBar, PayStatus, UploadButton } from "@/components/ui";
 
 interface Trace { name: string; input: Record<string, unknown>; result: unknown; error?: boolean }
 interface Turn { role: "user" | "assistant"; content: string; trace?: Trace[]; mode?: "claude" | "local"; error?: boolean }
 
 const PROMPTS = [
-  "Analyse my statement",
-  "Show me all my monthly bills",
   "How much do I owe this month?",
-  "What payments are coming up?",
   "Help me organise my bills before payday",
   "Which subscriptions can I cancel?",
   "Identify duplicate payments",
-  "How much could I save by cancelling unused subscriptions?",
-  "Prepare my electricity payment",
   "Confirm all high-confidence bills",
+  "Analyse my statement",
 ];
 
 const TOOL_LABEL: Record<string, string> = {
@@ -50,15 +50,19 @@ function snapshot(state: AppState): AppState {
 }
 
 export default function Agent() {
-  const { state, ready, updateSubscription } = useStore();
+  const { state, ready, updateSubscription, logAction, removePayment } = useStore();
+  const home = state.settings.homeCurrency;
+  const { rates } = useRates(home);
+  const today = new Date().toISOString().slice(0, 10);
   const [applied, setApplied] = useState<Record<string, boolean>>({});
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const end = useRef<HTMLDivElement>(null);
+  const chat = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    end.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    if (turns.length) end.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [turns, busy]);
 
   async function ask(q: string) {
@@ -68,6 +72,7 @@ export default function Agent() {
     setTurns(next);
     setInput("");
     setBusy(true);
+    if (window.innerWidth < 1280) chat.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     try {
       const r = await fetch("/api/agent", {
         method: "POST",
@@ -84,7 +89,7 @@ export default function Agent() {
     }
   }
 
-  // Deep links (e.g. "Plan with the agent" on the overview) arrive as ?q=…
+  // Deep links (e.g. "Ask the agent" on the overview) arrive as ?q=…
   const asked = useRef(false);
   useEffect(() => {
     if (!ready || asked.current || (!state.subscriptions.length && !state.transactions.length)) return;
@@ -97,116 +102,235 @@ export default function Agent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, state.subscriptions.length]);
 
-  const lastMode = [...turns].reverse().find((t) => t.mode)?.mode;
-  const drafts = turns.flatMap((t) => t.trace ?? []).filter((t) => t.name === "prepare_payment" && !(t.result as { error?: string }).error);
-  const draft = drafts[drafts.length - 1]?.result as DraftResult | undefined;
+  const subs = state.subscriptions;
+  const attention = useMemo(() => attentionItems(state, today).filter((a) => !a.id.startsWith("pd-") && a.id !== "review"), [state, today]);
+  const savings = useMemo(() => savingsPotential(subs, home, rates, today), [subs, home, rates, today]);
+  const inc = useMemo(() => income(state.transactions, home, today), [state.transactions, home, today]);
+  const upcoming = useMemo(() => upcomingRenewals(subs, today, 14), [subs, today]);
+  const drafts = state.payments.filter((p) => p.status === "prepared");
+  const review = subs.filter((s) => s.status === "detected");
+  const sure = review.filter((s) => s.confidence >= 0.85);
+  const done = useMemo(() => {
+    const acts = (state.actions ?? []).map((a) => ({ id: a.id, at: a.at, title: a.title, detail: a.detail, href: a.href }));
+    const paid = state.payments.filter((p) => p.status === "confirmed" && !(state.actions ?? []).some((a) => a.kind === "payment-sent" && a.href === `/activity/${p.id}`)).map((p) => ({ id: p.id, at: p.createdAt, title: `Paid ${p.merchant}`, detail: `${p.destinationAmount} ${TOKENS[p.destinationToken].display} confirmed on Celo`, href: `/activity/${p.id}` }));
+    return [...acts, ...paid].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 8);
+  }, [state.actions, state.payments]);
 
-  if (ready && !state.subscriptions.length && !state.transactions.length)
+  const lastMode = [...turns].reverse().find((t) => t.mode)?.mode;
+
+  if (!ready) return null;
+  if (!subs.length && !state.transactions.length)
     return (
-      <div className="px-4 py-16 sm:px-8 lg:px-12">
-        <div className="kicker mb-3">Agent</div>
-        <h1 className="display text-[46px]">Nothing to analyse yet.</h1>
-        <p className="mt-3 text-muted">Your agent works from the statements you upload. <Link href="/onboarding" className="link">Upload a statement</Link> first, or try demo mode from the overview.</p>
+      <div>
+        <PageBar title="Agent" sub="Your bills agent works from the statements you upload." />
+        <div className="px-4 sm:px-6 lg:px-8">
+          <section className="panel">
+            <EmptyPanel icon="agent" title="Nothing for the agent to work on yet" action={<UploadButton />}>
+              Upload a statement and the agent will queue up bills to review, payments coming due and places you could save. It never acts without your approval.
+            </EmptyPanel>
+          </section>
+        </div>
       </div>
     );
 
+  const confirmAll = () => {
+    sure.forEach((s) => updateSubscription(s.id, { status: "confirmed" }));
+    logAction({ kind: "confirmed", title: `Confirmed ${sure.length} high-confidence bill${sure.length === 1 ? "" : "s"}`, detail: sure.map((s) => s.displayName).join(", "), href: "/bills" });
+  };
+  const awaiting = drafts.length + (review.length ? 1 : 0);
+
   return (
-    <div className="grid min-h-[calc(100dvh-1px)] xl:grid-cols-[1fr_360px]">
-      <section className="flex min-w-0 flex-col xl:border-r xl:rule">
-        <div className="border-b rule px-4 pt-8 pb-5 sm:px-8 lg:px-12">
-          <div className="kicker mb-2 flex items-center gap-3">
-            Agent workspace
-            {lastMode && <span className={`tag ${lastMode === "local" ? "border-amber/40 bg-amber-wash text-amber" : ""}`}>{lastMode === "claude" ? "Claude · tool use" : "Local intent mode · no LLM key"}</span>}
-          </div>
-          <h1 className="display text-[36px] sm:text-[44px]">Ask about your bills.</h1>
-          <p className="mt-2 max-w-xl text-[14px] text-muted">Your agent reads the transactions you imported and the bills found in them. It can explain your spending, plan around payday, tidy your list and prepare payments — you approve anything that changes or moves money.</p>
-        </div>
+    <div>
+      <PageBar
+        title="Agent"
+        sub="Work the agent has queued up from your statements. Nothing changes or moves money until you approve it."
+        actions={lastMode && <span className={`pill ${lastMode === "local" ? "pill-amber" : "pill-green"}`}>{lastMode === "claude" ? "Claude with tools" : "Local mode · no model key"}</span>}
+      />
 
-        <div className="flex-1 px-4 py-6 sm:px-8 lg:px-12">
-          {!turns.length && (
-            <div className="grid max-w-3xl gap-px border rule bg-rule sm:grid-cols-2">
-              {PROMPTS.map((p) => (
-                <button key={p} onClick={() => ask(p)} className="bg-paper px-4 py-4 text-left text-[15px] hover:bg-paper-2">
-                  <span className="display text-[19px]">“{p}”</span>
-                </button>
-              ))}
+      <div className="grid gap-4 px-4 sm:px-6 lg:px-8 xl:grid-cols-[minmax(0,1fr)_420px]">
+        <div className="min-w-0 space-y-4">
+          <section className="panel">
+            <div className="panel-head">
+              <h2 className="panel-title flex items-center gap-2">Awaiting your approval <span className="count">{awaiting}</span></h2>
             </div>
-          )}
-          <div className="max-w-3xl space-y-8">
-            {turns.map((t, i) =>
-              t.role === "user" ? (
-                <div key={i} className="border-t border-ink pt-4">
-                  <div className="kicker mb-1">You asked</div>
-                  <div className="display text-[24px]">{t.content}</div>
-                </div>
-              ) : (
-                <div key={i}>
-                  {t.trace && t.trace.length > 0 && (
-                    <ul className="mb-3 space-y-1">
-                      {t.trace.map((tr, j) => (
-                        <li key={j} className="font-mono text-[11px] text-muted">
-                          <span className={tr.error ? "text-alert" : "text-accent"}>→</span> {TOOL_LABEL[tr.name] ?? tr.name}
-                          {Object.keys(tr.input).length > 0 && <span className="hidden text-faint sm:inline"> {JSON.stringify(tr.input)}</span>}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  <div className={`text-[15px] leading-relaxed ${t.error ? "text-alert" : "text-ink"}`}>
-                    <Markdown text={t.content} />
-                  </div>
-                  {(t.trace ?? [])
-                    .filter((tr) => tr.name === "prepare_payment" && !(tr.result as { error?: string }).error)
-                    .map((tr, j) => (
-                      <div key={`d${j}`} className="mt-4 max-w-md xl:hidden">
-                        <Draft d={tr.result as DraftResult} />
+            {!awaiting ? (
+              <EmptyPanel icon="check" title="Nothing waiting on you">Ask the agent to prepare a payment or tidy your bills, and it will appear here.</EmptyPanel>
+            ) : (
+              <ul className="divide-y divide-[var(--color-rule)]">
+                {drafts.map((p) => (
+                  <li key={p.id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <Avatar name={p.merchant} />
+                      <div className="min-w-0">
+                        <div className="text-[13.5px] font-medium">Pay {p.merchant} <span className="ml-1 align-middle"><PayStatus status={p.status} /></span></div>
+                        <div className="text-[12.5px] text-muted num">{p.sourceAmount} {TOKENS[p.sourceToken].display} → {p.destinationAmount} {TOKENS[p.destinationToken].display}{p.rate ? ` · ${p.rate}` : ""}</div>
                       </div>
-                    ))}
-                  {(t.trace ?? [])
-                    .map((tr, j) => ({ tr, key: `${i}-${j}` }))
-                    .filter(({ tr }) => tr.name === "propose_subscription_changes" && ((tr.result as Proposal).changes?.length ?? 0) > 0)
-                    .map(({ tr, key }) => (
-                      <ProposalCard
-                        key={key}
-                        p={tr.result as Proposal}
-                        applied={!!applied[key]}
-                        onApply={() => {
-                          (tr.result as Proposal).changes.forEach((c) => updateSubscription(c.id, c.patch ?? { status: c.to as "confirmed" | "dismissed" | "detected" }));
-                          setApplied((a) => ({ ...a, [key]: true }));
-                        }}
-                      />
-                    ))}
-                </div>
-              ),
+                    </div>
+                    <div className="flex shrink-0 gap-1.5">
+                      <Link href={`/pay/${encodeURIComponent(p.subscriptionId)}`} className="btn btn-primary btn-sm">Review and approve</Link>
+                      <button className="btn btn-quiet btn-sm" onClick={() => removePayment(p.id)}>Discard</button>
+                    </div>
+                  </li>
+                ))}
+                {review.length > 0 && (
+                  <li className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] bg-amber-wash text-amber"><Icon name="bills" size={16} /></span>
+                      <div className="min-w-0">
+                        <div className="text-[13.5px] font-medium">Confirm {review.length} detected bill{review.length === 1 ? "" : "s"}</div>
+                        <div className="truncate text-[12.5px] text-muted">{review.slice(0, 4).map((s) => s.displayName).join(", ")}{review.length > 4 ? ` and ${review.length - 4} more` : ""}</div>
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 gap-1.5">
+                      {sure.length > 0 && <button className="btn btn-primary btn-sm" onClick={confirmAll}>Confirm {sure.length} high-confidence</button>}
+                      <Link href="/bills?view=review" className="btn btn-ghost btn-sm">Review each</Link>
+                    </div>
+                  </li>
+                )}
+              </ul>
             )}
-            {busy && <div className="font-mono text-[12px] text-muted">→ working…</div>}
-            <div ref={end} />
+          </section>
+
+          <section className="panel">
+            <div className="panel-head"><h2 className="panel-title flex items-center gap-2">Recommendations <span className="count">{attention.length + savings.flags.length + (inc.nextPayday ? 1 : 0)}</span></h2></div>
+            <ul className="divide-y divide-[var(--color-rule)]">
+              {attention.map((a) => (
+                <li key={a.id} className="flex items-start justify-between gap-3 px-4 py-3 sm:px-5">
+                  <div className="flex min-w-0 gap-3">
+                    <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${a.severity === "high" ? "bg-alert" : a.severity === "medium" ? "bg-amber" : "bg-line-strong"}`} />
+                    <div className="min-w-0"><div className="text-[13.5px] font-medium">{a.title}</div><div className="text-[12.5px] text-muted">{a.detail}</div></div>
+                  </div>
+                  <Link href={a.href} className="btn btn-ghost btn-sm shrink-0">{a.action}</Link>
+                </li>
+              ))}
+              {savings.flags.map((f) => (
+                <li key={f.subscriptionId} className="flex items-start justify-between gap-3 px-4 py-3 sm:px-5">
+                  <div className="flex min-w-0 gap-3">
+                    <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-accent" />
+                    <div className="min-w-0">
+                      <div className="text-[13.5px] font-medium">Consider cancelling {f.name} <span className="num font-normal text-muted">· saves {money(f.monthlyHome ?? f.monthly, f.monthlyHome !== null ? home : f.currency)}/mo</span></div>
+                      <div className="text-[12.5px] text-muted">{f.reason}</div>
+                    </div>
+                  </div>
+                  <button className="btn btn-ghost btn-sm shrink-0" onClick={() => ask(`Should I cancel ${f.name}?`)}>Ask why</button>
+                </li>
+              ))}
+              {inc.nextPayday && (
+                <li className="flex items-start justify-between gap-3 px-4 py-3 sm:px-5">
+                  <div className="flex min-w-0 gap-3">
+                    <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-info" />
+                    <div className="min-w-0"><div className="text-[13.5px] font-medium">Plan bills before payday</div><div className="text-[12.5px] text-muted">Next income expected around {date(inc.nextPayday)}.</div></div>
+                  </div>
+                  <button className="btn btn-ghost btn-sm shrink-0" onClick={() => ask("Help me organise my bills before payday")}>Plan it</button>
+                </li>
+              )}
+              {!attention.length && !savings.flags.length && !inc.nextPayday && <li className="px-5 py-4 text-[13px] text-muted">No recommendations right now.</li>}
+            </ul>
+          </section>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <section className="panel">
+              <div className="panel-head"><h2 className="panel-title">Due in the next 14 days</h2><Link href="/bills" className="link text-[12.5px]">All bills</Link></div>
+              {!upcoming.length ? (
+                <p className="px-5 py-4 text-[13px] text-muted">Nothing due in the next two weeks.</p>
+              ) : (
+                <ul className="divide-y divide-[var(--color-rule)]">
+                  {upcoming.slice(0, 6).map((s) => (
+                    <li key={s.id} className="flex items-center justify-between gap-3 px-4 py-2.5 text-[13px] sm:px-5">
+                      <Link href={`/bills/${encodeURIComponent(s.id)}`} className="min-w-0 truncate hover:underline">{s.displayName}</Link>
+                      <span className="flex shrink-0 items-center gap-3">
+                        <span className="num text-muted">{dueIn(s, today) === 0 ? "Today" : `${dueIn(s, today)}d`}</span>
+                        <span className="num">{s.billType === "variable" ? "≈" : ""}{money(s.amount, s.currency)}</span>
+                        <Link href={`/pay/${encodeURIComponent(s.id)}`} className="btn btn-ghost btn-sm">Pay</Link>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+            <section className="panel">
+              <div className="panel-head"><h2 className="panel-title">Completed</h2></div>
+              {!done.length ? (
+                <p className="px-5 py-4 text-[13px] text-muted">Actions you approve are logged here.</p>
+              ) : (
+                <ul className="divide-y divide-[var(--color-rule)]">
+                  {done.map((d) => (
+                    <li key={d.id} className="flex items-start gap-2.5 px-4 py-2.5 text-[13px] sm:px-5">
+                      <Icon name="check" size={15} className="mt-0.5 shrink-0 text-accent" />
+                      <div className="min-w-0">
+                        {d.href ? <Link href={d.href} className="font-medium hover:underline">{d.title}</Link> : <span className="font-medium">{d.title}</span>}
+                        <div className="truncate text-[12px] text-muted">{d.detail ? `${d.detail} · ` : ""}{new Date(d.at).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
           </div>
         </div>
 
-        <form
-          className="sticky bottom-[57px] border-t rule bg-paper px-4 py-4 sm:px-8 lg:bottom-0 lg:px-12"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void ask(input);
-          }}
-        >
-          <div className="flex max-w-3xl gap-2">
-            <input className="field h-11 flex-1 text-[15px]" placeholder="e.g. Which renewals hit before the 15th?" value={input} onChange={(e) => setInput(e.target.value)} disabled={busy} />
-            <button className="btn btn-primary h-11" disabled={busy || !input.trim()}>Ask</button>
+        <section ref={chat} className="panel flex min-h-[420px] flex-col xl:sticky xl:top-6 xl:h-[calc(100dvh-140px)] xl:self-start">
+          <div className="panel-head"><h2 className="panel-title flex items-center gap-2"><Icon name="agent" size={16} className="text-accent" />Ask the agent</h2>{turns.length > 0 && <button className="btn btn-quiet btn-sm" onClick={() => { setTurns([]); setApplied({}); }}>Clear</button>}</div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+            {!turns.length ? (
+              <div>
+                <p className="text-[13px] text-muted">Ask about your spending, plan around payday or have it prepare a payment. It uses the tools listed under each answer so you can see what it looked at.</p>
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {PROMPTS.map((p) => <button key={p} onClick={() => ask(p)} className="rounded-full border rule bg-surface px-3 py-1.5 text-left text-[12.5px] hover:border-line-strong hover:bg-paper-2">{p}</button>)}
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {turns.map((t, i) =>
+                  t.role === "user" ? (
+                    <div key={i} className="ml-8 rounded-[8px] bg-paper-2 px-3 py-2 text-[13.5px]">{t.content}</div>
+                  ) : (
+                    <div key={i}>
+                      {t.trace && t.trace.length > 0 && (
+                        <ul className="mb-2 flex flex-wrap gap-1">
+                          {t.trace.map((tr, j) => <li key={j} className={`tag ${tr.error ? "text-alert" : ""}`}>{TOOL_LABEL[tr.name] ?? tr.name}</li>)}
+                        </ul>
+                      )}
+                      <div className={`text-[13.5px] leading-relaxed ${t.error ? "text-alert" : ""}`}><Markdown text={t.content} /></div>
+                      {(t.trace ?? []).filter((tr) => tr.name === "prepare_payment" && !(tr.result as { error?: string }).error).map((tr, j) => <div key={`d${j}`} className="mt-3"><Draft d={tr.result as DraftResult} /></div>)}
+                      {(t.trace ?? [])
+                        .map((tr, j) => ({ tr, key: `${i}-${j}` }))
+                        .filter(({ tr }) => tr.name === "propose_subscription_changes" && ((tr.result as Proposal).changes?.length ?? 0) > 0)
+                        .map(({ tr, key }) => (
+                          <ProposalCard
+                            key={key}
+                            p={tr.result as Proposal}
+                            applied={!!applied[key]}
+                            onApply={() => {
+                              const p = tr.result as Proposal;
+                              p.changes.forEach((c) => updateSubscription(c.id, c.patch ?? { status: c.to as "confirmed" | "dismissed" | "detected" }));
+                              logAction({ kind: p.action === "confirm" ? "confirmed" : p.action === "dismiss" ? "dismissed" : p.action === "restore" ? "restored" : "recategorised", title: `${p.action === "categorise" ? "Updated" : p.action === "confirm" ? "Confirmed" : p.action === "dismiss" ? "Dismissed" : "Restored"} ${p.changes.length === 1 ? p.changes[0].name : `${p.changes.length} bills`}`, detail: "Approved from the agent" });
+                              setApplied((a) => ({ ...a, [key]: true }));
+                            }}
+                          />
+                        ))}
+                    </div>
+                  ),
+                )}
+                {busy && <div className="flex items-center gap-2 text-[12.5px] text-muted"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />Working…</div>}
+                <div ref={end} />
+              </div>
+            )}
           </div>
-        </form>
-      </section>
-
-      <aside className="hidden px-8 py-8 xl:block">
-        <div className="kicker mb-4">Payment draft</div>
-        {draft ? <Draft d={draft} /> : <p className="text-[13px] text-muted">Ask the agent to prepare a payment. Drafts appear here for review — nothing is sent until you approve on the payment screen.</p>}
-        <div className="mt-10 border-t rule pt-6">
-          <div className="kicker mb-3">Tools available</div>
-          <ul className="space-y-1.5 text-[13px] text-ink-2">
-            {Object.values(TOOL_LABEL).map((l) => <li key={l}>{l}</li>)}
-          </ul>
-        </div>
-      </aside>
+          <form
+            className="border-t rule p-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void ask(input);
+            }}
+          >
+            <div className="flex gap-2">
+              <input className="input flex-1" placeholder="Ask about your bills…" value={input} onChange={(e) => setInput(e.target.value)} disabled={busy} aria-label="Message the agent" />
+              <button className="btn btn-primary" disabled={busy || !input.trim()}>Send</button>
+            </div>
+          </form>
+        </section>
+      </div>
     </div>
   );
 }
@@ -221,12 +345,13 @@ interface DraftResult {
 
 function Draft({ d }: { d: DraftResult }) {
   return (
-    <div className="border border-ink">
-      <div className="border-b border-ink px-4 py-3">
-        <div className="display text-[22px]">{d.subscription.name}</div>
+    <div className="rounded-[6px] border rule bg-surface">
+      <div className="border-b rule px-4 py-3">
+        <div className="label mb-1">Payment draft</div>
+        <div className="text-[15px] font-semibold">{d.subscription.name}</div>
         <div className="num text-[13px] text-muted">{money(d.subscription.amount, d.subscription.currency)} · due {d.subscription.next_renewal}</div>
       </div>
-      <dl className="divide-y divide-rule px-4 text-[13px]">
+      <dl className="divide-y divide-[var(--color-rule)] px-4 text-[13px]">
         <div className="flex justify-between py-2"><dt className="text-muted">Route</dt><dd>{d.plan.needsConversion ? `${d.plan.sourceToken} → ${d.plan.destinationToken}` : d.plan.destinationToken}</dd></div>
         {d.quote?.pay && <div className="flex justify-between py-2"><dt className="text-muted">You pay</dt><dd className="num">{d.quote.pay}</dd></div>}
         {d.quote?.rate && <div className="flex justify-between py-2"><dt className="text-muted">Rate</dt><dd className="num">{d.quote.rate}</dd></div>}
@@ -234,8 +359,8 @@ function Draft({ d }: { d: DraftResult }) {
         <div className="flex justify-between py-2"><dt className="text-muted">Balance</dt><dd className={`num ${d.balance?.sufficient === false ? "text-alert" : ""}`}>{d.balance?.available ? `${d.balance.available} ${d.balance.token}` : d.balance?.error}</dd></div>
       </dl>
       {d.plan.problems.length > 0 && <ul className="space-y-1 border-t rule px-4 py-3 text-[12px] text-alert">{d.plan.problems.map((p) => <li key={p}>{p}</li>)}</ul>}
-      <div className="border-t border-ink p-3">
-        <Link href={d.review_url} className="btn btn-primary w-full">Review &amp; approve</Link>
+      <div className="border-t rule p-3">
+        <Link href={d.review_url} className="btn btn-primary btn-sm w-full">Review and approve</Link>
       </div>
     </div>
   );
@@ -250,25 +375,25 @@ interface Proposal {
 function ProposalCard({ p, applied, onApply }: { p: Proposal; applied: boolean; onApply(): void }) {
   const verb = p.action === "confirm" ? "Confirm" : p.action === "dismiss" ? "Dismiss" : p.action === "categorise" ? "Apply" : "Restore";
   return (
-    <div className="mt-4 max-w-xl border border-ink">
+    <div className="mt-3 rounded-[6px] border rule bg-surface">
       <div className="flex items-center justify-between border-b rule px-4 py-2.5">
-        <span className="kicker">Proposed change</span>
+        <span className="label">Proposed change</span>
         <span className="text-[12px] text-muted">{p.changes.length} item{p.changes.length > 1 ? "s" : ""}</span>
       </div>
-      <ul className="divide-y divide-rule px-4 text-[14px]">
+      <ul className="divide-y divide-[var(--color-rule)] px-4 text-[13px]">
         {p.changes.map((c) => (
           <li key={c.id} className="flex items-center justify-between py-2">
-            <Link href={`/subscriptions/${encodeURIComponent(c.id)}`} className="hover:underline">{c.name}</Link>
+            <Link href={`/bills/${encodeURIComponent(c.id)}`} className="hover:underline">{c.name}</Link>
             <span className="text-[12px] text-muted">{c.from} → <span className={c.to === "dismissed" ? "text-alert" : c.to === "confirmed" ? "text-accent" : ""}>{c.to}</span></span>
           </li>
         ))}
       </ul>
       {p.reason && <p className="border-t rule px-4 py-2 text-[12px] text-muted">{p.reason}</p>}
-      <div className="flex items-center gap-3 border-t border-ink px-4 py-3">
+      <div className="flex flex-wrap items-center gap-3 border-t rule px-4 py-3">
         {applied ? (
-          <span className="text-[13px] text-accent">Applied ✓</span>
+          <span className="pill pill-green">Applied</span>
         ) : (
-          <button className="btn btn-primary h-9" onClick={onApply}>{verb} {p.changes.length > 1 ? `all ${p.changes.length}` : ""}</button>
+          <button className="btn btn-primary btn-sm" onClick={onApply}>{verb} {p.changes.length > 1 ? `all ${p.changes.length}` : ""}</button>
         )}
         <span className="text-[12px] text-muted">Changes your list on this device only.</span>
       </div>

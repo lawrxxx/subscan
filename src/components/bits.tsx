@@ -3,44 +3,21 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { txUrl } from "@/lib/celo/config";
 import { shortHash } from "@/lib/format";
+import { ConfidenceText, PayStatus } from "./ui";
 import type { PaymentStatus, SubscriptionStatus } from "@/lib/types";
 
 export function Confidence({ value }: { value: number }) {
-  const pct = Math.round(value * 100);
-  const filled = Math.round(value * 5);
-  return (
-    <span className="inline-flex items-center gap-2" title={`Detection confidence ${pct}%`}>
-      <span className="flex gap-[2px]" aria-hidden>
-        {Array.from({ length: 5 }).map((_, i) => (
-          <span key={i} className={`h-[9px] w-[4px] ${i < filled ? (value >= 0.75 ? "bg-accent" : value >= 0.55 ? "bg-ink-2" : "bg-amber") : "bg-stone"}`} />
-        ))}
-      </span>
-      <span className="num text-[12px] text-muted">{pct}%</span>
-    </span>
-  );
+  return <ConfidenceText value={value} />;
 }
 
 export function StatusTag({ status }: { status: SubscriptionStatus }) {
-  if (status === "confirmed") return <span className="tag border-accent/40 bg-accent-wash text-accent">Confirmed</span>;
-  if (status === "dismissed") return <span className="tag text-muted">Dismissed</span>;
-  return <span className="tag border-amber/40 bg-amber-wash text-amber">Detected</span>;
+  if (status === "confirmed") return <span className="pill pill-green">Active</span>;
+  if (status === "dismissed") return <span className="pill">Dismissed</span>;
+  return <span className="pill pill-amber">Needs review</span>;
 }
 
-const TX: Record<PaymentStatus, { label: string; cls: string }> = {
-  prepared: { label: "Prepared", cls: "text-muted" },
-  pending: { label: "Pending", cls: "border-amber/40 bg-amber-wash text-amber" },
-  confirmed: { label: "Confirmed", cls: "border-accent/40 bg-accent-wash text-accent" },
-  failed: { label: "Failed", cls: "border-alert/40 bg-alert-wash text-alert" },
-};
-
 export function TxStatus({ status }: { status: PaymentStatus }) {
-  const t = TX[status];
-  return (
-    <span className={`tag ${t.cls}`}>
-      {status === "pending" && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber" />}
-      {t.label}
-    </span>
-  );
+  return <PayStatus status={status} />;
 }
 
 export function HashLink({ hash, n = 6 }: { hash: string; n?: number }) {

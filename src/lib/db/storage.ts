@@ -1,11 +1,7 @@
-// Persistence boundary. The MVP stores everything in the browser; a server
-// database can be added later by implementing this interface (e.g. an adapter
-// that calls API routes) without touching the UI or the store.
-//
-// Two workspaces are kept strictly apart:
-//   - "user": the person's own imported statements, bills and payment records.
-//   - "demo": a generated sample statement for exploring the product.
-// Demo data is never written to, read from, or merged with the user workspace.
+// Persistence boundary. The MVP stores the user's own data in the browser; a
+// server database can be added later by implementing this interface (e.g. an
+// adapter that calls API routes) without touching the UI or the store.
+// There is no demo or sample data: a new user starts with an empty account.
 import type { AppState } from "../types";
 
 export interface StorageAdapter {
@@ -44,21 +40,13 @@ export function browserStorage(key: string): StorageAdapter {
 }
 
 export const USER_KEY = "subscan:v1";
-export const DEMO_KEY = "subscan:demo";
-export const MODE_KEY = "subscan:mode";
 
-export function readMode(): "user" | "demo" {
-  try {
-    return localStorage.getItem(MODE_KEY) === "demo" ? "demo" : "user";
-  } catch {
-    return "user";
-  }
-}
+/** Keys used by earlier builds for demo mode. Deleted on load. */
+const LEGACY_KEYS = ["subscan:demo", "subscan:mode"];
 
-export function writeMode(mode: "user" | "demo") {
+export function purgeLegacyKeys() {
   try {
-    if (mode === "demo") localStorage.setItem(MODE_KEY, "demo");
-    else localStorage.removeItem(MODE_KEY);
+    for (const k of LEGACY_KEYS) localStorage.removeItem(k);
   } catch {
     /* ignore */
   }

@@ -3,19 +3,27 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { parseEventLogs, encodeFunctionData } from "viem";
 import { addressUrl, CHAIN_ID, ERC8004, ERC8004_IDENTITY_ABI, TEXTILE, TOKENS } from "@/lib/celo/config";
+import { ATTRIBUTION_CODES } from "@/lib/celo/attribution";
 import { publicClient, sendTx, waitForReceipt } from "@/lib/celo/wallet";
 import { useStore } from "@/lib/db/store";
+import { date, shortHash } from "@/lib/format";
 import { HashLink } from "@/components/bits";
-import { PageHeader } from "@/components/shell";
+import { EmptyPanel, Icon, PageBar, PayStatus } from "@/components/ui";
 import { useWallet } from "@/components/wallet";
 
 interface Status {
   celoRpc: { ok: boolean; block?: string; error?: string };
   textile: { ok: boolean; ngnPerUsd?: number; auth?: string; error?: string };
-  agent: { llm: boolean; model: string };
-  supabase: boolean;
-  mono: boolean;
   erc8004AgentId: string | null;
+}
+
+function Row({ k, children }: { k: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-4 border-b rule-soft px-4 py-2.5 text-[13px] last:border-b-0 sm:px-5">
+      <dt className="shrink-0 text-muted">{k}</dt>
+      <dd className="min-w-0 text-right">{children}</dd>
+    </div>
+  );
 }
 
 export default function WalletPage() {
@@ -29,6 +37,8 @@ export default function WalletPage() {
   }, []);
 
   const agentId = state.settings.agentId ?? status?.erc8004AgentId ?? undefined;
+  const history = state.payments.filter((p) => p.status !== "prepared").slice(0, 6);
+  const fx = state.payments.filter((p) => p.status === "confirmed" && p.sourceToken !== p.destinationToken);
 
   async function register() {
     if (!w.address) return;
@@ -50,89 +60,147 @@ export default function WalletPage() {
 
   return (
     <div>
-      <PageHeader kicker="Wallet" title={<>Your wallet on <span className="italic">Celo</span></>}>Balances are read live from Celo mainnet. subscan never holds keys or funds.</PageHeader>
+      <PageBar
+        title="Wallet"
+        sub="Balances are read live from Celo mainnet. subscan never holds your keys or funds."
+        actions={w.address ? <button className="btn btn-ghost" onClick={w.refresh}>Refresh</button> : <button className="btn btn-primary" onClick={w.connect} disabled={!w.hasProvider || w.connecting}>{w.connecting ? "Connecting…" : "Connect wallet"}</button>}
+      />
 
-      <section className="grid border-b rule lg:grid-cols-[1.2fr_1fr]">
-        <div className="px-4 py-10 sm:px-8 lg:border-r lg:rule lg:px-12">
-          <div className="kicker mb-4">Wallet</div>
-          {!w.address ? (
-            <>
-              <div className="display text-[30px]">Not connected</div>
-              <p className="mt-2 max-w-md text-[14px] text-muted">
-                {w.hasProvider ? `Detected: ${w.name}. ` : "No browser wallet detected. Open subscan in MiniPay or install a Celo-compatible wallet (MetaMask, Valora, Rabby). "}
-                subscan asks for your address only; every transaction needs your approval in the wallet.
-              </p>
-              <button className="btn btn-primary mt-6" onClick={w.connect} disabled={!w.hasProvider || w.connecting}>{w.connecting ? "Connecting…" : "Connect wallet"}</button>
-            </>
-          ) : (
-            <>
-              <a href={addressUrl(w.address)} target="_blank" rel="noreferrer" className="font-mono text-[14px] break-all link">{w.address}</a>
-              <div className="mt-2 flex flex-wrap items-center gap-2 text-[13px]">
-                <span className="tag">{w.name}</span>
-                {w.onCelo ? <span className="tag border-accent/40 bg-accent-wash text-accent">Celo mainnet · {CHAIN_ID}</span> : <><span className="tag border-alert/40 bg-alert-wash text-alert">Chain {w.chainId ?? "?"}</span><button className="link text-[13px]" onClick={w.switchToCelo}>Switch to Celo</button></>}
-              </div>
-              <div className="mt-8 grid grid-cols-3 border-t border-ink">
-                {(["USDT", "cNGN", "CELO"] as const).map((t) => (
-                  <div key={t} className="border-b rule py-4 pr-3">
-                    <div className="text-[12px] text-muted">{t === "CELO" ? "CELO" : TOKENS[t].display}</div>
-                    <div className="figure mt-1 text-[30px] sm:text-[38px]">{w.balances ? Number(w.balances[t]).toLocaleString("en-US", { maximumFractionDigits: t === "CELO" ? 4 : 2 }) : "—"}</div>
-                  </div>
-                ))}
-              </div>
-              {w.balanceError && <p className="mt-2 text-[12px] text-alert">{w.balanceError}</p>}
-              <div className="mt-4 flex gap-3">
-                <button className="btn btn-ghost" onClick={w.refresh}>Refresh balances</button>
-                <button className="btn btn-ghost" onClick={w.disconnect}>Forget wallet</button>
-              </div>
-            </>
-          )}
-          {w.error && <p className="mt-3 text-[13px] text-alert">{w.error}</p>}
-
-        </div>
-
-        <div className="bg-paper-2/60 px-4 py-10 sm:px-8 lg:px-10">
-          <div className="kicker mb-4">Agent identity · ERC-8004</div>
-          {agentId ? (
-            <>
-              <div className="figure text-[64px]">#{agentId}</div>
-              <p className="mt-2 text-[13px] text-muted">Registered on the ERC-8004 Identity Registry, Celo mainnet.</p>
-              {state.settings.agentRegistrationTx && <div className="mt-2"><HashLink hash={state.settings.agentRegistrationTx} /></div>}
-            </>
-          ) : (
-            <>
-              <div className="display text-[26px]">Not registered</div>
-              <p className="mt-2 text-[13px] text-muted">
-                Registering mints an identity NFT to the signing wallet, which becomes its owner and published agent wallet. Use a dedicated wallet, or run <code className="font-mono">npm run agent:register</code> server-side.
-              </p>
-              <button className="btn btn-ghost mt-5" disabled={!w.address || !w.onCelo || reg.busy} onClick={register}>{reg.busy ? "Registering…" : "Register from this wallet"}</button>
-              {reg.hash && <div className="mt-2"><HashLink hash={reg.hash} /></div>}
-              {reg.error && <p className="mt-2 text-[12px] text-alert">{reg.error}</p>}
-            </>
-          )}
-          <dl className="mt-6 space-y-1 text-[12px]">
-            <div className="flex justify-between gap-2"><dt className="text-muted">Registry</dt><dd><a className="font-mono link" href={addressUrl(ERC8004.identityRegistry)} target="_blank" rel="noreferrer">{ERC8004.identityRegistry.slice(0, 10)}…</a></dd></div>
-            <div className="flex justify-between gap-2"><dt className="text-muted">Agent card</dt><dd><a className="font-mono link" href="/api/erc8004" target="_blank" rel="noreferrer">/api/erc8004</a></dd></div>
-          </dl>
-        </div>
-      </section>
-
-      <section className="px-4 py-10 sm:px-8 lg:px-12">
-        <h2 className="display mb-4 text-[26px]">Contracts subscan uses</h2>
-        <dl className="max-w-3xl border-t border-ink text-[13px]">
-          {[
-            ["USD₮ token", TOKENS.USDT.address],
-            ["cNGN token", TOKENS.cNGN.address],
-            ["Textile FX LimitOrderReactor", TEXTILE.reactor],
-            ["ERC-8004 Identity Registry", ERC8004.identityRegistry],
-          ].map(([k, v]) => (
-            <div key={k} className="flex flex-col gap-1 border-b rule py-3 sm:flex-row sm:items-center sm:justify-between">
-              <dt className="text-muted">{k}</dt>
-              <dd><a className="font-mono text-[12px] link break-all" href={addressUrl(v)} target="_blank" rel="noreferrer">{v}</a></dd>
+      <div className="grid gap-4 px-4 sm:px-6 lg:grid-cols-[1.4fr_1fr] lg:px-8">
+        <div className="space-y-4">
+          <section className="panel">
+            <div className="panel-head">
+              <h2 className="panel-title">Connected wallet</h2>
+              {w.address && (w.onCelo ? <span className="pill pill-green">Celo mainnet</span> : <span className="pill pill-red">Wrong network</span>)}
             </div>
-          ))}
-        </dl>
-        <p className="mt-3 text-[12px] text-muted">Celo mainnet, chain {CHAIN_ID}. Addresses verified against Textile FX and Celo documentation. Network preferences live in <Link href="/settings" className="link">Settings</Link>.</p>
-      </section>
+            {!w.address ? (
+              <EmptyPanel icon="wallet" title="No wallet connected" action={<button className="btn btn-primary" onClick={w.connect} disabled={!w.hasProvider || w.connecting}>{w.connecting ? "Connecting…" : "Connect wallet"}</button>}>
+                {w.hasProvider ? `${w.name} detected. ` : "No browser wallet found. Open subscan in MiniPay, or use MetaMask, Valora or Rabby. "}
+                subscan only reads your address; every transaction needs your approval in the wallet.
+              </EmptyPanel>
+            ) : (
+              <>
+                <dl>
+                  <Row k="Address"><a href={addressUrl(w.address)} target="_blank" rel="noreferrer" className="font-mono text-[12.5px] link"><span className="hidden sm:inline">{w.address}</span><span className="sm:hidden">{shortHash(w.address, 6)}</span> ↗</a></Row>
+                  <Row k="Wallet">{w.name}</Row>
+                  <Row k="Network">{w.onCelo ? <>Celo mainnet · chain {CHAIN_ID}</> : <span className="inline-flex items-center gap-2 text-alert">Chain {w.chainId ?? "unknown"} <button className="btn btn-ghost btn-sm" onClick={w.switchToCelo}>Switch to Celo</button></span>}</Row>
+                  <Row k="Network fees">{state.settings.payGasInUsdt ? "Paid in USD₮ (fee abstraction)" : "Paid in CELO"} · <Link href="/settings" className="link">change</Link></Row>
+                </dl>
+                <div className="border-t rule">
+                  <table className="tbl">
+                    <thead><tr><th>Asset</th><th className="hidden sm:table-cell">Contract</th><th className="r">Balance</th></tr></thead>
+                    <tbody>
+                      {(["USDT", "cNGN", "CELO"] as const).map((t) => (
+                        <tr key={t}>
+                          <td className="font-medium">{t === "CELO" ? "CELO" : TOKENS[t].display}<div className="text-[12px] font-normal text-muted">{t === "USDT" ? "Tether USD" : t === "cNGN" ? "Nigerian naira stablecoin" : "Celo native · gas"}</div></td>
+                          <td className="hidden sm:table-cell">{t === "CELO" ? <span className="text-[12px] text-muted">Native</span> : <a className="font-mono text-[12px] link" href={addressUrl(TOKENS[t].address)} target="_blank" rel="noreferrer">{shortHash(TOKENS[t].address, 4)}</a>}</td>
+                          <td className="r figure text-[17px]">{w.balances ? Number(w.balances[t]).toLocaleString("en-US", { maximumFractionDigits: t === "CELO" ? 4 : 2 }) : "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {w.balanceError && <p className="border-t rule px-5 py-2 text-[12px] text-alert">{w.balanceError}</p>}
+                <div className="flex justify-end border-t rule px-4 py-2.5"><button className="btn btn-quiet btn-sm" onClick={w.disconnect}>Forget wallet</button></div>
+              </>
+            )}
+            {w.error && <p className="border-t rule px-5 py-2 text-[12px] text-alert">{w.error}</p>}
+          </section>
+
+          <section className="panel">
+            <div className="panel-head">
+              <h2 className="panel-title">Payment history</h2>
+              <Link href="/activity?tab=payments" className="link text-[13px]">All payments</Link>
+            </div>
+            {!history.length ? (
+              <EmptyPanel icon="activity" title="No on-chain payments yet">Payments you approve from a bill appear here with their Celo transaction hashes.</EmptyPanel>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="tbl">
+                  <thead><tr><th>Date</th><th>Payee</th><th className="r">Amount</th><th className="hidden md:table-cell">Settlement tx</th><th>Status</th></tr></thead>
+                  <tbody>
+                    {history.map((p) => {
+                      const settle = p.steps.find((s) => s.kind === "settlement")?.hash;
+                      return (
+                        <tr key={p.id}>
+                          <td className="num whitespace-nowrap text-muted">{date(p.createdAt.slice(0, 10))}</td>
+                          <td><Link href={`/activity/${p.id}`} className="font-medium hover:underline">{p.merchant}</Link></td>
+                          <td className="r num whitespace-nowrap">{p.destinationAmount} {TOKENS[p.destinationToken].display}</td>
+                          <td className="hidden md:table-cell">{settle ? <HashLink hash={settle} n={4} /> : <span className="text-[12px] text-faint">—</span>}</td>
+                          <td><PayStatus status={p.status} /></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </div>
+
+        <div className="space-y-4">
+          <section className="panel">
+            <div className="panel-head">
+              <h2 className="panel-title">Textile FX</h2>
+              {status && (status.textile.ok ? <span className="pill pill-green">Live</span> : <span className="pill pill-red">Unavailable</span>)}
+            </div>
+            <div className="px-4 pt-4 pb-3 sm:px-5">
+              <div className="label">Indicative rate</div>
+              <div className="figure mt-1 text-[24px]">{status?.textile.ngnPerUsd ? <>1 USD₮ = ₦{status.textile.ngnPerUsd.toLocaleString("en-US", { maximumFractionDigits: 2 })}</> : status ? "—" : "Loading…"}</div>
+              <p className="mt-1 text-[12px] text-muted">Firm quotes are requested from Textile when you approve a payment and hold for a short window.</p>
+            </div>
+            <dl className="border-t rule">
+              <Row k="Pair">USD₮ ↔ cNGN</Row>
+              <Row k="Protocol fee">Shown on each quote</Row>
+              <Row k="Settlement">LimitOrderReactor · <a className="font-mono text-[12px] link" href={addressUrl(TEXTILE.reactor)} target="_blank" rel="noreferrer">{shortHash(TEXTILE.reactor, 4)}</a></Row>
+              <Row k="Quote auth">{status?.textile.auth === "api-key" ? "Builder API key (server-side)" : "Wallet proof (EIP-712)"}</Row>
+              <Row k="Your conversions">{fx.length ? `${fx.length} confirmed` : "None yet"}</Row>
+            </dl>
+          </section>
+
+          <section className="panel">
+            <div className="panel-head">
+              <h2 className="panel-title">Agent identity · ERC-8004</h2>
+              {agentId ? <span className="pill pill-green">Registered</span> : <span className="pill">Not registered</span>}
+            </div>
+            {agentId ? (
+              <div className="px-4 py-4 sm:px-5">
+                <div className="figure text-[28px]">Agent #{agentId}</div>
+                <p className="mt-1 text-[12.5px] text-muted">Registered on the ERC-8004 Identity Registry, Celo mainnet.</p>
+                {state.settings.agentRegistrationTx && <div className="mt-2"><HashLink hash={state.settings.agentRegistrationTx} /></div>}
+              </div>
+            ) : (
+              <div className="px-4 py-4 sm:px-5">
+                <p className="text-[13px] text-muted">Registering mints an identity NFT to the signing wallet, which becomes its owner. Use a dedicated wallet, or run <code className="font-mono text-[12px]">npm run agent:register</code> on a server.</p>
+                <button className="btn btn-ghost mt-3" disabled={!w.address || !w.onCelo || reg.busy} onClick={register}>{reg.busy ? "Registering…" : "Register from this wallet"}</button>
+                {reg.hash && <div className="mt-2"><HashLink hash={reg.hash} /></div>}
+                {reg.error && <p className="mt-2 text-[12px] text-alert">{reg.error}</p>}
+              </div>
+            )}
+            <dl className="border-t rule">
+              <Row k="Registry"><a className="font-mono text-[12px] link" href={addressUrl(ERC8004.identityRegistry)} target="_blank" rel="noreferrer">{shortHash(ERC8004.identityRegistry, 4)}</a></Row>
+              <Row k="Agent card"><a className="font-mono text-[12px] link" href="/api/erc8004" target="_blank" rel="noreferrer">/api/erc8004 ↗</a></Row>
+            </dl>
+          </section>
+
+          <section className="panel">
+            <div className="panel-head"><h2 className="panel-title">Transaction attribution</h2><span className="pill pill-plain">ERC-8021</span></div>
+            <div className="px-4 py-4 text-[13px] sm:px-5">
+              <p className="text-muted">Every transaction subscan builds carries these builder codes in its calldata, so it can be verified on chain.</p>
+              <div className="mt-3 flex flex-wrap gap-1.5">{ATTRIBUTION_CODES.map((c) => <code key={c} className="tag font-mono">{c}</code>)}</div>
+            </div>
+          </section>
+
+          <section className="panel">
+            <div className="panel-head"><h2 className="panel-title">Network</h2>{status && (status.celoRpc.ok ? <span className="pill pill-green">Online</span> : <span className="pill pill-red">Unreachable</span>)}</div>
+            <dl>
+              <Row k="Chain">Celo mainnet · {CHAIN_ID}</Row>
+              <Row k="Latest block"><span className="num">{status?.celoRpc.block ? Number(status.celoRpc.block).toLocaleString("en-US") : "—"}</span></Row>
+              <Row k="Explorer"><a href="https://celoscan.io" target="_blank" rel="noreferrer" className="link">celoscan.io <Icon name="arrow" size={12} className="inline" /></a></Row>
+            </dl>
+          </section>
+        </div>
+      </div>
     </div>
   );
 }
