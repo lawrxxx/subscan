@@ -27,6 +27,23 @@ Checks: `npm run typecheck`, `npm test`, `npm run build`.
 Import the repo in Vercel (framework: Next.js, defaults). In Settings → Environment Variables set, as needed:
 `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_CELO_ATTRIBUTION_CODE` (your assigned hackathon code), `TEXTILE_API_KEY`, `ANTHROPIC_API_KEY`, `ERC8004_AGENT_ID`. Redeploy after changing `NEXT_PUBLIC_*` values.
 
+## Environment variables (Vercel CLI)
+
+`env.manifest.json` lists every variable the app reads (names and rules only, never values). `scripts/vercel-env.mjs` manages them on the linked Vercel project through the Vercel CLI:
+
+```
+npx vercel login           # once
+npx vercel link            # once; writes .vercel/ (git-ignored)
+npm run env:status         # configured vs missing per environment; never prints values
+npm run env:sync           # prompts (hidden input) for everything missing, then redeploys and verifies
+npm run env:add -- GEMINI_API_KEY            # add one variable
+npm run env:add -- GEMINI_API_KEY --replace  # overwrite; asks you to type the name to confirm
+npm run env:deploy         # redeploy production
+npm run env:verify         # check the live deployment picked the values up
+```
+
+Secrets are stored as Vercel sensitive variables in production and preview, and are read from a hidden prompt or stdin, never from arguments. Existing values are never overwritten without `--replace` and a typed confirmation. `NEXT_PUBLIC_*` variables are visible in the browser and can't be secrets. To add a new variable, add it to the manifest and run `npm run env:sync`.
+
 ## Layout
 
 | Path | What |

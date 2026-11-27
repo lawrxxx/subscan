@@ -8,7 +8,12 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "node --test --experimental-strip-types tests/*.test.ts",
-    "agent:register": "node --experimental-strip-types scripts/register-agent.ts"
+    "agent:register": "node --experimental-strip-types scripts/register-agent.ts",
+    "env:status": "node scripts/vercel-env.mjs status",
+    "env:sync": "node scripts/vercel-env.mjs sync",
+    "env:add": "node scripts/vercel-env.mjs add",
+    "env:deploy": "node scripts/vercel-env.mjs deploy",
+    "env:verify": "node scripts/vercel-env.mjs verify"
   },
   "dependencies": {
     "@celo/attribution-tags": "^0.7.0",
