@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { decodeFunctionData, encodeFunctionData, erc20Abi } from "viem";
 import { fromDataSuffix } from "@celo/attribution-tags";
-import { ATTRIBUTION_CODES, decodeAttribution, tagCalldata } from "../src/lib/celo/attribution.ts";
+import { ATTRIBUTION_CODES, REPO_CODE, decodeAttribution, tagCalldata } from "../src/lib/celo/attribution.ts";
+import { codeFromRepo } from "@celo/attribution-tags";
 
 test("tags ERC-20 transfer calldata without changing the call", () => {
   const data = encodeFunctionData({ abi: erc20Abi, functionName: "transfer", args: ["0x000000000000000000000000000000000000dEaD", 5_000_000n] });
@@ -22,6 +23,7 @@ test("does not double-tag calldata that already carries a suffix", () => {
   assert.equal(fromDataSuffix(data), null);
 });
 
-test("carries subscan's code and the hackathon code", () => {
-  assert.deepEqual(ATTRIBUTION_CODES, ["subscan", "celo_e97672462153"]);
+test("carries subscan's code, the hackathon code and the repo-derived code", () => {
+  assert.deepEqual(ATTRIBUTION_CODES, ["subscan", "celo_e97672462153", "celo_ca51be5bb086"]);
+  assert.equal(REPO_CODE, codeFromRepo("lawrxxx/subscan"));
 });

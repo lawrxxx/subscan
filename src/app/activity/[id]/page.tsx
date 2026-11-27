@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { decodeAttribution } from "@/lib/celo/attribution";
+import { verifyTx } from "@celo/attribution-tags";
 import { addressUrl, TOKENS } from "@/lib/celo/config";
 import { publicClient } from "@/lib/celo/wallet";
 import { useStore } from "@/lib/db/store";
@@ -51,8 +51,9 @@ export default function Receipt() {
     Promise.all(
       hashes.split(",").map(async (h) => {
         try {
-          const tx = await publicClient.getTransaction({ hash: h as `0x${string}` });
-          return [h, decodeAttribution(tx.input)] as const;
+          // verifyTx also decodes smart-account (ERC-4337) and relayed-wallet transactions.
+          const r = await verifyTx({ client: publicClient as unknown as Parameters<typeof verifyTx>[0]["client"], hash: h as `0x${string}` });
+          return [h, r?.codes ?? null] as const;
         } catch {
           return [h, undefined] as const;
         }
