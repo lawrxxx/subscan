@@ -21,3 +21,7 @@ test("does not double-tag calldata that already carries a suffix", () => {
   assert.equal(tagCalldata(once), once);
   assert.equal(fromDataSuffix(data), null);
 });
+
+test("carries subscan's code and the hackathon code", () => {
+  assert.deepEqual(ATTRIBUTION_CODES, ["subscan", "celo_e97672462153"]);
+});

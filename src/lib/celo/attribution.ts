@@ -9,7 +9,10 @@ import { concat, type Hex } from "viem";
 
 const VALID = /^[a-z0-9_]{1,32}$/;
 
-const assigned = (process.env.NEXT_PUBLIC_CELO_ATTRIBUTION_CODE ?? "").trim().toLowerCase();
+/** Code issued to subscan by the Celo hackathon. Not a secret; the env var can override it. */
+export const HACKATHON_CODE = "celo_e97672462153";
+
+const assigned = (process.env.NEXT_PUBLIC_CELO_ATTRIBUTION_CODE || HACKATHON_CODE).trim().toLowerCase();
 
 /** subscan's own code first, then the program-assigned code (required for credit) if configured. */
 export const ATTRIBUTION_CODES: string[] = ["subscan", ...(VALID.test(assigned) && assigned !== "subscan" ? [assigned] : [])];
