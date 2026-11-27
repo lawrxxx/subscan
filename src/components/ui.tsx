@@ -2,6 +2,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import type { PaymentStatus, Subscription } from "@/lib/types";
+import { level, LEVEL_LABEL } from "@/lib/review";
 
 /* Icons: 1.5px line icons drawn for subscan (24px grid). */
 const PATHS: Record<string, string> = {
@@ -91,14 +92,10 @@ export function PayStatus({ status }: { status: PaymentStatus }) {
   return <span className={`pill ${cls}`}>{label}</span>;
 }
 
-export function ConfidenceText({ value }: { value: number }) {
-  const pct = Math.round(value * 100);
-  const word = value >= 0.85 ? "High" : value >= 0.65 ? "Medium" : "Low";
-  return (
-    <span className={`text-[12px] ${value >= 0.85 ? "text-muted" : value >= 0.65 ? "text-ink-2" : "text-amber"}`} title={`Detection confidence ${pct}%`}>
-      {word} · {pct}%
-    </span>
-  );
+/** Plain-language recurrence label, based on the evidence rather than a raw score. */
+export function RecurrenceText({ s }: { s: Subscription }) {
+  const lv = level(s);
+  return <span className={`text-[12px] ${lv === "likely" ? "text-accent" : lv === "possible" ? "text-ink-2" : "text-amber"}`}>{s.manual ? "Added by you" : LEVEL_LABEL[lv]}</span>;
 }
 
 export function EmptyPanel({ icon = "doc", title, children, action }: { icon?: string; title: string; children?: ReactNode; action?: ReactNode }) {

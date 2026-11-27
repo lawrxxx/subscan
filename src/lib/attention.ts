@@ -22,7 +22,7 @@ export function attentionItems(state: AppState, today: string): AttentionItem[] 
   for (const s of live.filter((s) => s.missed && !s.lapsed))
     items.push({ id: `m-${s.id}`, severity: "high", title: `${s.displayName}: expected payment missing`, detail: `Usually charged around ${s.missed!.expected}, but it isn’t in your statement.`, href: `/bills/${encodeURIComponent(s.id)}`, action: "Review" });
   const review = live.filter((s) => s.status === "detected");
-  if (review.length) items.push({ id: "review", severity: "medium", title: `Review ${review.length} detected bill${review.length === 1 ? "" : "s"}`, detail: "Confirm what’s real and dismiss the rest so your totals are accurate.", href: "/bills?view=review", action: "Review" });
+  if (review.length) items.push({ id: "review", severity: "medium", title: `Check ${review.length} suggested recurring payment${review.length === 1 ? "" : "s"}`, detail: "Confirm the ones you really pay so your totals are right.", href: "/review", action: "Review" });
   for (const p of state.payments.filter((p) => p.status === "prepared").slice(0, 3))
     items.push({ id: `pd-${p.id}`, severity: "medium", title: `Finish paying ${p.merchant}`, detail: `Draft for ${p.destinationAmount} ${p.destinationToken} — nothing has been sent yet.`, href: `/pay/${encodeURIComponent(p.subscriptionId)}`, action: "Continue" });
   for (const s of live.filter((s) => s.unusual))

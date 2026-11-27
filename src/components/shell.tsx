@@ -34,7 +34,7 @@ export function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
   const { state, ready } = useStore();
   const w = useWallet();
-  if (path.startsWith("/onboarding")) return <>{children}</>;
+  if (path.startsWith("/onboarding") || path.startsWith("/review")) return <>{children}</>;
   const review = state.subscriptions.filter((s) => s.status === "detected").length;
 
   return (

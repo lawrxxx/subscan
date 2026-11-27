@@ -342,6 +342,12 @@
     gap: 1.25rem;
     border-bottom: 1px solid var(--color-rule);
     overflow-x: auto;
+    min-width: 0;
+    max-width: 100%;
+    scrollbar-width: none;
+  }
+  .tabs > button {
+    flex-shrink: 0;
   }
   .tabs > button {
     padding: 0.6rem 0;

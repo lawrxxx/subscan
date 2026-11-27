@@ -12,7 +12,7 @@ import { Missing } from "@/components/empty";
 import { date, daysUntil, FREQ_LABEL, money, relDays } from "@/lib/format";
 import type { BillType, Frequency, ObligationKind, PaymentTarget, Subscription } from "@/lib/types";
 import { CATEGORIES, KIND_LABEL } from "@/lib/detection/merchants";
-import { Avatar, BillStatus, ConfidenceText, Icon, PayStatus, Stat } from "@/components/ui";
+import { Avatar, BillStatus, RecurrenceText, Icon, PayStatus, Stat } from "@/components/ui";
 
 export default function BillDetail() {
   const { id } = useParams<{ id: string }>();
@@ -138,7 +138,7 @@ export default function BillDetail() {
 
         <div className="space-y-4">
           <section className="panel">
-            <div className="panel-head"><h2 className="panel-title">Why we think this recurs</h2>{!s.manual && <ConfidenceText value={s.confidence} />}</div>
+            <div className="panel-head"><h2 className="panel-title">Why we think this recurs</h2>{!s.manual && <RecurrenceText s={s} />}</div>
             <ul className="space-y-1.5 px-4 py-4 text-[13px] text-ink-2 sm:px-5">{(s.manual ? ["You added this bill yourself."] : s.confidenceReasons).map((r) => <li key={r} className="flex gap-2"><Icon name="check" size={14} className="mt-0.5 shrink-0 text-faint" />{r}</li>)}</ul>
             {!s.lapsed && <p className="border-t rule px-4 py-3 text-[12px] text-muted sm:px-5">Next date estimated from a ~{s.intervalDays}-day billing interval.</p>}
           </section>

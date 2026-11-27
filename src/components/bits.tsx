@@ -3,12 +3,8 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { txUrl } from "@/lib/celo/config";
 import { shortHash } from "@/lib/format";
-import { ConfidenceText, PayStatus } from "./ui";
+import { PayStatus } from "./ui";
 import type { PaymentStatus, SubscriptionStatus } from "@/lib/types";
-
-export function Confidence({ value }: { value: number }) {
-  return <ConfidenceText value={value} />;
-}
 
 export function StatusTag({ status }: { status: SubscriptionStatus }) {
   if (status === "confirmed") return <span className="pill pill-green">Active</span>;

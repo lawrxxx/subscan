@@ -8,7 +8,7 @@ import { useRates, useStore } from "@/lib/db/store";
 import { date, FREQ_LABEL, money } from "@/lib/format";
 import type { Frequency, ObligationKind, Subscription } from "@/lib/types";
 import { AddBill } from "@/components/add-bill";
-import { Avatar, BillStatus, ConfidenceText, EmptyPanel, Icon, PageBar, UploadButton } from "@/components/ui";
+import { Avatar, BillStatus, RecurrenceText, EmptyPanel, Icon, PageBar, UploadButton } from "@/components/ui";
 
 type View = "all" | "review" | ObligationKind | "dismissed";
 type Sort = "due" | "amount" | "name";
@@ -61,7 +61,6 @@ export default function Bills() {
     updateSubscription(s.id, { status });
     logAction({ kind: status === "confirmed" ? "confirmed" : status === "dismissed" ? "dismissed" : "restored", title: `${status === "confirmed" ? "Confirmed" : status === "dismissed" ? "Dismissed" : "Restored"} ${s.displayName}`, href: `/bills/${encodeURIComponent(s.id)}` });
   };
-  const sure = list.filter((s) => s.status === "detected" && s.confidence >= 0.85);
 
   return (
     <div>
@@ -122,10 +121,10 @@ export default function Bills() {
             </div>
           </div>}
 
-          {view === "review" && sure.length > 1 && (
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b rule bg-accent-wash/40 px-4 py-2.5 text-[13px]">
-              <span>{sure.length} of these have high detection confidence.</span>
-              <button className="btn btn-ghost btn-sm" onClick={() => sure.forEach((s) => setStatus(s, "confirmed"))}>Confirm all {sure.length}</button>
+          {view === "review" && counts.review > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b rule bg-paper-2/40 px-4 py-2.5 text-[13px]">
+              <span>Go through suggestions one at a time, with the dates and reasons for each.</span>
+              <Link href="/review" className="btn btn-primary btn-sm">Review suggestions</Link>
             </div>
           )}
 
@@ -149,7 +148,7 @@ export default function Bills() {
                     <th className="hidden md:table-cell">Frequency</th>
                     <th className="hidden sm:table-cell">Next due</th>
                     <th className="r">Amount</th>
-                    <th className="hidden xl:table-cell">Confidence</th>
+                    <th className="hidden xl:table-cell">Evidence</th>
                     <th className="hidden sm:table-cell">Status</th>
                     <th className="r hidden sm:table-cell"><span className="sr-only">Actions</span></th>
                   </tr>
@@ -175,7 +174,7 @@ export default function Bills() {
                       <td className="hidden text-muted md:table-cell">{FREQ_LABEL[s.frequency]}</td>
                       <td className={`hidden whitespace-nowrap num sm:table-cell ${s.missed ? "text-alert" : s.lapsed ? "text-faint line-through" : ""}`}>{s.missed ? "Overdue?" : date(s.nextRenewal)}</td>
                       <td className="r whitespace-nowrap">{s.billType === "variable" ? "≈ " : ""}{money(s.amount, s.currency)}<div className={`text-[12px] sm:hidden ${s.missed ? "text-alert" : s.status === "detected" ? "text-amber" : "text-muted"}`}>{s.missed ? "Overdue?" : s.status === "detected" ? "Needs review" : date(s.nextRenewal)}</div></td>
-                      <td className="hidden xl:table-cell">{s.manual ? <span className="text-[12px] text-muted">You added</span> : <ConfidenceText value={s.confidence} />}</td>
+                      <td className="hidden xl:table-cell">{s.manual ? <span className="text-[12px] text-muted">You added</span> : <RecurrenceText s={s} />}</td>
                       <td className="hidden sm:table-cell"><BillStatus s={s} /></td>
                       <td className="r hidden whitespace-nowrap sm:table-cell">
                         {s.status === "detected" ? (

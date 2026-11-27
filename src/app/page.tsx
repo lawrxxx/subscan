@@ -94,7 +94,7 @@ export default function Overview() {
               {estimate && (
                 <p className="mt-2.5 border-t rule pt-2.5 text-[12px] text-muted">
                   {thin && <>Based on {state.transactions.length} transactions over {spanDays} days — figures are rough until you upload 3+ months. </>}
-                  {unconfirmed > 0 && <>Includes {unconfirmed} detected bill{unconfirmed === 1 ? "" : "s"} you haven&rsquo;t confirmed. <Link href="/bills?view=review" className="link">Review</Link></>}
+                  {unconfirmed > 0 && <>Includes {unconfirmed} detected bill{unconfirmed === 1 ? "" : "s"} you haven&rsquo;t confirmed. <Link href="/review" className="link">Review</Link></>}
                 </p>
               )}
             </section>

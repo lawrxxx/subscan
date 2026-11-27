@@ -4,16 +4,13 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Wordmark } from "@/components/shell";
 import { ReviewTable, reviewTotals } from "@/components/review-table";
-import { Avatar, ConfidenceText, Icon } from "@/components/ui";
+import { Icon } from "@/components/ui";
 import { useStore } from "@/lib/db/store";
-import { KIND_LABEL } from "@/lib/detection/merchants";
-import { date, FREQ_LABEL, money } from "@/lib/format";
 import { extractStatement } from "@/lib/import";
 import { markDuplicates, flagInFileRepeats } from "@/lib/import/normalise";
 import { takePendingUpload } from "@/lib/import/pending";
 import { PdfPasswordError } from "@/lib/import/pdf";
 import type { ColumnMapping, ExtractResult, ExtractedRow } from "@/lib/import/types";
-import type { ImportRecord, ObligationKind } from "@/lib/types";
 
 type Step =
   | { kind: "pick" }
@@ -21,7 +18,7 @@ type Step =
   | { kind: "password"; file: File; incorrect: boolean }
   | { kind: "mapping"; file: File; result: ExtractResult }
   | { kind: "review"; file: File; result: ExtractResult; rows: ExtractedRow[] }
-  | { kind: "bills"; record: ImportRecord; ids: string[] };
+
 
 const ROLES: { key: keyof ColumnMapping; label: string; required?: boolean }[] = [
   { key: "date", label: "Date", required: true },
@@ -33,11 +30,13 @@ const ROLES: { key: keyof ColumnMapping; label: string; required?: boolean }[] =
   { key: "currency", label: "Currency" },
 ];
 
-const STEPS = ["Upload", "Check transactions", "Review bills"];
+const STEPS = ["Upload", "Check transactions", "Review payments"];
 
 function Progress({ at }: { at: number }) {
   return (
-    <ol className="flex items-center gap-2 text-[12.5px]" aria-label="Progress">
+    <>
+    <span className="text-[12.5px] text-muted sm:hidden">Step {at + 1} of {STEPS.length}</span>
+    <ol className="hidden items-center gap-2 text-[12.5px] sm:flex" aria-label="Progress">
       {STEPS.map((s, i) => (
         <li key={s} className={`flex items-center gap-2 ${i === at ? "font-medium text-ink" : i < at ? "text-accent" : "text-faint"}`} aria-current={i === at ? "step" : undefined}>
           <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-[11px] ${i < at ? "bg-accent text-surface" : i === at ? "bg-ink text-surface" : "bg-paper-2 text-muted"}`}>{i < at ? <Icon name="check" size={12} /> : i + 1}</span>
@@ -46,6 +45,7 @@ function Progress({ at }: { at: number }) {
         </li>
       ))}
     </ol>
+    </>
   );
 }
 
@@ -100,13 +100,10 @@ export default function UploadStatement() {
     const before = new Set(state.subscriptions.map((s) => s.id));
     const { record, subscriptions } = importRows(step.rows, { fileName: step.file.name, format: step.result.format, source: step.result.format.startsWith("PDF") ? "pdf" : "csv" });
     updateSettings({ onboarded: true });
-    // Review the bills this statement produced (new ones first, then any it updated).
-    const ids = subscriptions.filter((s) => !s.manual && s.status !== "dismissed").sort((a, b) => Number(before.has(a.id)) - Number(before.has(b.id)) || a.confidence - b.confidence).map((s) => s.id);
-    setStep({ kind: "bills", record, ids });
-    window.scrollTo(0, 0);
+    router.push(subscriptions.some((x) => !x.manual) ? "/review" : "/?imported=none");
   }
 
-  const at = step.kind === "review" ? 1 : step.kind === "bills" ? 2 : 0;
+  const at = step.kind === "review" ? 1 : 0;
 
   return (
     <div className="min-h-dvh">
@@ -118,8 +115,6 @@ export default function UploadStatement() {
 
       {step.kind === "review" ? (
         <Review step={step} home={home} onChange={(rows) => setStep({ ...step, rows })} onCancel={() => setStep({ kind: "pick" })} onSave={save} />
-      ) : step.kind === "bills" ? (
-        <BillsReview record={step.record} ids={step.ids} onDone={() => router.push("/")} />
       ) : (
         <div className="mx-auto max-w-[640px] space-y-5 px-4 py-8 sm:px-6 lg:py-12">
           <section>
@@ -206,9 +201,9 @@ function Review({ step, home, onChange, onCancel, onSave }: { step: Extract<Step
   const t = reviewTotals(step.rows, home);
   const pending = step.rows.filter((r) => r.issues.length && !r.include && !r.duplicateOf).length;
   return (
-    <div className="pb-28">
-      <div className="mx-auto max-w-6xl px-4 pt-6 pb-4 sm:px-6 lg:px-8">
-        <h1 className="title text-[28px]">Check your transactions</h1>
+    <div className="pb-[calc(96px+env(safe-area-inset-bottom))]">
+      <div className="mx-auto max-w-6xl px-4 pt-5 pb-3 sm:px-6 lg:px-8">
+        <h1 className="title text-[21px] sm:text-[24px]">Check your transactions</h1>
         <p className="mt-1 text-[13.5px] text-muted">
           We read <span className="num text-ink">{step.rows.length}</span> rows from {step.file.name} ({step.result.format}). Correct anything that looks wrong. Nothing is saved until you continue.
         </p>
@@ -217,107 +212,18 @@ function Review({ step, home, onChange, onCancel, onSave }: { step: Extract<Step
       <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
         <ReviewTable rows={step.rows} onChange={onChange} />
       </div>
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t rule bg-surface/95 px-4 py-3 backdrop-blur sm:px-6 lg:px-8">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3">
-          <div className="text-[13px]">
-            <span className="num font-medium">{t.count}</span> to save · out <span className="num">{t.out}</span> · in <span className="num text-accent">{t.in}</span>
-            {t.from && <span className="text-muted"> · {t.from} → {t.to}</span>}
-            {pending > 0 && <span className="text-amber"> · {pending} flagged rows left out</span>}
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t rule bg-surface/95 px-4 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] backdrop-blur sm:px-6 lg:px-8">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
+          <div className="min-w-0 text-[12.5px] leading-tight">
+            <div><span className="num font-medium">{t.count}</span> transactions to save</div>
+            <div className="truncate text-muted">{pending > 0 ? <span className="text-amber">{pending} unclear rows left out</span> : <>out <span className="num">{t.out}</span> · in <span className="num">{t.in}</span></>}</div>
           </div>
-          <div className="flex gap-2">
-            <button className="btn btn-ghost" onClick={onCancel}>Back</button>
-            <button className="btn btn-primary" disabled={!t.count} onClick={onSave}>Save and find bills</button>
+          <div className="flex shrink-0 gap-2">
+            <button className="btn btn-ghost hidden sm:inline-flex" onClick={onCancel}>Back</button>
+            <button className="btn btn-primary" disabled={!t.count} onClick={onSave}>Save and continue</button>
           </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-function BillsReview({ record, ids, onDone }: { record: ImportRecord; ids: string[]; onDone(): void }) {
-  const { state, updateSubscription, logAction } = useStore();
-  const list = ids.map((id) => state.subscriptions.find((s) => s.id === id)).filter((s): s is NonNullable<typeof s> => !!s);
-  const categories = [...new Set(state.subscriptions.map((s) => s.category))].sort();
-  const open = list.filter((s) => s.status === "detected").length;
-  const set = (id: string, name: string, status: "confirmed" | "dismissed" | "detected") => {
-    updateSubscription(id, { status });
-    logAction({ kind: status === "detected" ? "restored" : status, title: `${status === "confirmed" ? "Confirmed" : status === "dismissed" ? "Dismissed" : "Restored"} ${name}`, detail: "During statement import", href: `/bills/${encodeURIComponent(id)}` });
-  };
-
-  return (
-    <div className="mx-auto max-w-5xl px-4 py-6 pb-28 sm:px-6 lg:py-8">
-      <h1 className="title text-[28px]">{list.length ? `We found ${list.length} regular payment${list.length === 1 ? "" : "s"}` : "No regular payments found"}</h1>
-      <p className="mt-1 text-[13.5px] text-muted">
-        {record.rows} transactions saved{record.duplicates ? `, ${record.duplicates} already imported were skipped` : ""}.{" "}
-        {list.length ? "Check each one. Lower-confidence matches are listed first — correct the type or category if we got it wrong." : ""}
-      </p>
-
-      {!list.length ? (
-        <div className="panel mt-6 px-6 py-8">
-          <p className="max-w-lg text-[14px] text-ink-2">A bill needs at least two charges from the same payee, spaced regularly, before we treat it as recurring. This statement didn&rsquo;t have any we could be confident about.</p>
-          <ul className="mt-3 list-disc space-y-1 pl-5 text-[13.5px] text-muted">
-            <li>Upload more months — three or more gives the best results.</li>
-            <li>Add a bill you know about yourself from the Bills page.</li>
-          </ul>
-          <div className="mt-5 flex gap-2">
-            <button className="btn btn-primary" onClick={onDone}>Go to overview</button>
-            <Link href="/bills?add=1" className="btn btn-ghost">Add a bill</Link>
-          </div>
-        </div>
-      ) : (
-        <section className="panel mt-6">
-          <ul className="divide-y divide-[var(--color-rule)]">
-            {list.map((s) => (
-              <li key={s.id} className={`grid gap-3 px-4 py-4 sm:px-5 md:grid-cols-[1.4fr_1fr_auto] md:items-center ${s.status === "dismissed" ? "opacity-55" : ""}`}>
-                <div className="flex min-w-0 items-start gap-3">
-                  <Avatar name={s.displayName} size={36} />
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                      <span className="font-medium">{s.displayName}</span>
-                      <span className="text-[13px] text-ink-2 num">{s.billType === "variable" ? "≈ " : ""}{money(s.amount, s.currency)} · {FREQ_LABEL[s.frequency].toLowerCase()}</span>
-                    </div>
-                    <div className="mt-0.5 text-[12px] text-muted">{s.chargeCount} charges since {date(s.firstSeen)} · next around {date(s.nextRenewal)}</div>
-                    <div className="mt-1 flex flex-wrap items-center gap-2"><ConfidenceText value={s.confidence} />{s.confidence < 0.85 && s.confidenceReasons[0] && <span className="text-[12px] text-muted">· {s.confidenceReasons[0]}</span>}</div>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <select className="input" aria-label={`Type for ${s.displayName}`} value={s.kind ?? "subscription"} onChange={(e) => updateSubscription(s.id, { kind: e.target.value as ObligationKind, edited: true })}>
-                    {(Object.keys(KIND_LABEL) as ObligationKind[]).map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}
-                  </select>
-                  <select className="input" aria-label={`Category for ${s.displayName}`} value={s.category} onChange={(e) => updateSubscription(s.id, { category: e.target.value, edited: true })}>
-                    {[...new Set([s.category, ...categories, "Entertainment", "Utilities", "Telecoms", "Insurance", "Housing", "Loans", "Software", "Education", "Health", "Other"])].map((c) => <option key={c}>{c}</option>)}
-                  </select>
-                </div>
-                <div className="flex gap-1.5 md:justify-end">
-                  {s.status === "detected" ? (
-                    <>
-                      <button className="btn btn-ghost btn-sm" onClick={() => set(s.id, s.displayName, "confirmed")}>Confirm</button>
-                      <button className="btn btn-quiet btn-sm" onClick={() => set(s.id, s.displayName, "dismissed")}>Not a bill</button>
-                    </>
-                  ) : (
-                    <>
-                      <span className={`pill ${s.status === "confirmed" ? "pill-green" : ""}`}>{s.status === "confirmed" ? "Confirmed" : "Dismissed"}</span>
-                      <button className="btn btn-quiet btn-sm" onClick={() => set(s.id, s.displayName, "detected")}>Undo</button>
-                    </>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {list.length > 0 && (
-        <div className="fixed inset-x-0 bottom-0 z-30 border-t rule bg-surface/95 px-4 py-3 backdrop-blur sm:px-6">
-          <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3">
-            <span className="text-[13px] text-muted">{open ? `${open} still to review — you can also do this later from Bills.` : "All reviewed."}</span>
-            <div className="flex gap-2">
-              {open > 0 && <button className="btn btn-ghost" onClick={() => list.filter((s) => s.status === "detected" && s.confidence >= 0.85).forEach((s) => set(s.id, s.displayName, "confirmed"))}>Confirm high-confidence</button>}
-              <button className="btn btn-primary" onClick={onDone}>See my overview</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

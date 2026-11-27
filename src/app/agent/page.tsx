@@ -19,8 +19,7 @@ const PROMPTS = [
   "Help me organise my bills before payday",
   "Which subscriptions can I cancel?",
   "Identify duplicate payments",
-  "Confirm all high-confidence bills",
-  "Analyse my statement",
+    "Analyse my statement",
 ];
 
 const TOOL_LABEL: Record<string, string> = {
@@ -121,7 +120,6 @@ export default function Agent() {
   const upcoming = useMemo(() => upcomingRenewals(subs, today, 14), [subs, today]);
   const drafts = state.payments.filter((p) => p.status === "prepared");
   const review = subs.filter((s) => s.status === "detected");
-  const sure = review.filter((s) => s.confidence >= 0.85);
   const done = useMemo(() => {
     const acts = (state.actions ?? []).map((a) => ({ id: a.id, at: a.at, title: a.title, detail: a.detail, href: a.href }));
     const paid = state.payments.filter((p) => p.status === "confirmed" && !(state.actions ?? []).some((a) => a.kind === "payment-sent" && a.href === `/activity/${p.id}`)).map((p) => ({ id: p.id, at: p.createdAt, title: `Paid ${p.merchant}`, detail: `${p.destinationAmount} ${TOKENS[p.destinationToken].display} confirmed on Celo`, href: `/activity/${p.id}` }));
@@ -144,10 +142,6 @@ export default function Agent() {
       </div>
     );
 
-  const confirmAll = () => {
-    sure.forEach((s) => updateSubscription(s.id, { status: "confirmed" }));
-    logAction({ kind: "confirmed", title: `Confirmed ${sure.length} high-confidence bill${sure.length === 1 ? "" : "s"}`, detail: sure.map((s) => s.displayName).join(", "), href: "/bills" });
-  };
   const awaiting = drafts.length + (review.length ? 1 : 0);
 
   return (
@@ -193,8 +187,7 @@ export default function Agent() {
                       </div>
                     </div>
                     <div className="flex shrink-0 gap-1.5">
-                      {sure.length > 0 && <button className="btn btn-primary btn-sm" onClick={confirmAll}>Confirm {sure.length} high-confidence</button>}
-                      <Link href="/bills?view=review" className="btn btn-ghost btn-sm">Review each</Link>
+                      <Link href="/review" className="btn btn-primary btn-sm">Review suggestions</Link>
                     </div>
                   </li>
                 )}
