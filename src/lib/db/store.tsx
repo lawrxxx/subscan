@@ -8,7 +8,7 @@ import { mergeTransactions, rowsToTransactions } from "../import/normalise";
 import type { ExtractedRow } from "../import/types";
 import { sampleStatementCsv } from "../sample";
 import type { AppSettings, AppState, ImportRecord, PaymentRecord, Subscription } from "../types";
-import { browserStorage, type StorageAdapter } from "./storage";
+import { browserStorage, DEMO_KEY, readMode, USER_KEY, writeMode, type StorageAdapter } from "./storage";
 
 const EMPTY: AppState = {
   transactions: [],
@@ -23,13 +23,19 @@ function withLapsed(subs: Subscription[]): Subscription[] {
   return subs.map((s) => ({ ...s, lapsed: !s.manual && (now - Date.parse(`${s.lastCharge}T00:00:00Z`)) / 86_400_000 > s.intervalDays * 2.2 }));
 }
 
+export type Workspace = "user" | "demo";
+
 interface Store {
   ready: boolean;
   storage: StorageAdapter["kind"];
+  /** Which workspace is showing. Demo data never touches the user's own data. */
+  mode: Workspace;
   state: AppState;
+  /** Open the demo workspace with a fresh sample statement (the user's data is untouched). */
+  enterDemo(): void;
+  exitDemo(): void;
   /** Save reviewed rows: de-duplicate against existing data, then re-run detection. */
   importRows(rows: ExtractedRow[], meta: { fileName: string; format: string; source: "csv" | "pdf" | "sample" }): { record: ImportRecord; subscriptions: Subscription[] };
-  loadSample(): Subscription[];
   removeImport(importId: string): void;
   addManual(sub: Subscription): void;
   removeSubscription(id: string): void;
@@ -42,32 +48,76 @@ interface Store {
 
 const Ctx = createContext<Store | null>(null);
 
-export function StoreProvider({ children, adapter = browserStorage }: { children: ReactNode; adapter?: StorageAdapter }) {
+function hydrate(saved: AppState | null): AppState {
+  if (!saved) return EMPTY;
+  return { ...EMPTY, ...saved, subscriptions: withLapsed(saved.subscriptions ?? []), settings: { ...EMPTY.settings, ...saved.settings } };
+}
+
+/**
+ * Older versions kept the sample statement in the same slot as real data.
+ * Strip it out so a sample is never presented as the user's own finances.
+ * Preferences and records of real payments are kept.
+ */
+function withoutLegacySample(s: AppState): AppState {
+  if (s.dataSource !== "sample") return s;
+  return { ...EMPTY, settings: s.settings, payments: s.payments.filter((p) => p.status !== "prepared") };
+}
+
+export function StoreProvider({ children, userAdapter = browserStorage(USER_KEY), demoAdapter = browserStorage(DEMO_KEY) }: { children: ReactNode; userAdapter?: StorageAdapter; demoAdapter?: StorageAdapter }) {
+  const [mode, setMode] = useState<Workspace>("user");
   const [state, setState] = useState<AppState>(EMPTY);
   const [ready, setReady] = useState(false);
   const ref = useRef(state);
   ref.current = state;
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+  const adapter = mode === "demo" ? demoAdapter : userAdapter;
 
   useEffect(() => {
     let live = true;
-    adapter.load().then((saved) => {
+    const m = readMode();
+    Promise.all([userAdapter.load(), demoAdapter.load()]).then(([user, demo]) => {
       if (!live) return;
-      if (saved) setState({ ...EMPTY, ...saved, subscriptions: withLapsed(saved.subscriptions ?? []), settings: { ...EMPTY.settings, ...saved.settings } });
+      let u = hydrate(user);
+      const cleaned = withoutLegacySample(u);
+      if (cleaned !== u) {
+        u = cleaned;
+        void userAdapter.save(u);
+      }
+      const useDemo = m === "demo" && !!demo;
+      setMode(useDemo ? "demo" : "user");
+      setState(useDemo ? hydrate(demo) : u);
       setReady(true);
     });
     return () => {
       live = false;
     };
-  }, [adapter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
+  /** Apply a change to the active workspace and persist it to that workspace only. */
   const commit = useCallback(
     (fn: (s: AppState) => AppState) => {
       const next = fn(ref.current);
       ref.current = next;
       setState(next);
-      void adapter.save(next);
+      void (modeRef.current === "demo" ? demoAdapter : userAdapter).save(next);
     },
-    [adapter],
+    [demoAdapter, userAdapter],
+  );
+
+  /** Switch workspaces synchronously from what is already stored. */
+  const switchTo = useCallback(
+    async (m: Workspace, demoState?: AppState) => {
+      const next = m === "demo" ? (demoState ?? hydrate(await demoAdapter.load())) : hydrate(await userAdapter.load());
+      if (demoState) await demoAdapter.save(demoState);
+      writeMode(m);
+      modeRef.current = m;
+      ref.current = next;
+      setMode(m);
+      setState(next);
+    },
+    [demoAdapter, userAdapter],
   );
 
   const store = useMemo<Store>(() => {
@@ -77,10 +127,13 @@ export function StoreProvider({ children, adapter = browserStorage }: { children
     };
     const importRows: Store["importRows"] = (rows, meta) => {
       const cur = ref.current;
+      if (meta.source !== "sample" && modeRef.current === "demo") {
+        throw new Error("Exit demo mode before importing your own statement.");
+      }
       const id = `imp_${Date.now().toString(36)}`;
       const incoming = rowsToTransactions(rows, meta.source, id);
-      // Real data replaces the sample statement rather than mixing with it.
-      const replacing = meta.source === "sample" || cur.dataSource === "sample";
+      // The demo workspace is regenerated rather than merged.
+      const replacing = meta.source === "sample";
       const base = replacing ? [] : cur.transactions;
       const { merged, added, duplicates } = mergeTransactions(base, incoming);
       const subs = redetect(merged, replacing ? cur.subscriptions.filter((x) => x.manual) : cur.subscriptions);
@@ -99,11 +152,31 @@ export function StoreProvider({ children, adapter = browserStorage }: { children
     return {
       ready,
       storage: adapter.kind,
+      mode,
       state,
       importRows,
-      loadSample() {
-        const r = extractCsv(sampleStatementCsv(), ref.current.settings.homeCurrency);
-        return importRows(r.rows, { fileName: "Sample statement", format: "CSV", source: "sample" }).subscriptions;
+      enterDemo() {
+        // Build the demo workspace from a freshly generated sample statement.
+        const settings = ref.current.settings;
+        const r = extractCsv(sampleStatementCsv(), settings.homeCurrency);
+        const id = `demo_${Date.now().toString(36)}`;
+        const txs = rowsToTransactions(r.rows, "sample", id);
+        const subs = detectSubscriptions(txs, { homeCurrency: settings.homeCurrency });
+        const dates = txs.map((t) => t.date).sort();
+        const demo: AppState = {
+          ...EMPTY,
+          settings: { ...settings, wallet: undefined, agentId: undefined, agentRegistrationTx: undefined },
+          transactions: txs,
+          subscriptions: subs,
+          importedAt: new Date().toISOString(),
+          dataSource: "sample",
+          imports: [{ id, at: new Date().toISOString(), fileName: "Demo sample statement", format: "CSV", rows: txs.length, duplicates: 0, from: dates[0], to: dates[dates.length - 1] }],
+        };
+        void switchTo("demo", demo);
+      },
+      exitDemo() {
+        void demoAdapter.clear();
+        void switchTo("user");
       },
       removeImport(importId) {
         const cur = ref.current;
@@ -139,7 +212,7 @@ export function StoreProvider({ children, adapter = browserStorage }: { children
         commit((s) => ({ ...EMPTY, settings: s.settings, payments: s.payments.filter((p) => p.status !== "prepared") }));
       },
     };
-  }, [ready, adapter.kind, state, commit]);
+  }, [ready, adapter.kind, mode, state, commit, switchTo, demoAdapter]);
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;
 }

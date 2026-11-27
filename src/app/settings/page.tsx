@@ -15,7 +15,7 @@ interface Status {
 }
 
 export default function Settings() {
-  const { state, updateSettings, reset, loadSample, removeImport } = useStore();
+  const { state, updateSettings, reset, enterDemo, exitDemo, mode, removeImport } = useStore();
   const [status, setStatus] = useState<Status | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
   const [saved, setSaved] = useState<string>();
@@ -101,7 +101,11 @@ export default function Settings() {
         </dl>
         <div className="mt-6 flex flex-wrap gap-3">
           <Link href="/onboarding" className="btn btn-ghost">Import a new statement</Link>
-          {state.dataSource !== "sample" && <button className="btn btn-ghost" onClick={() => { loadSample(); flash("Sample data loaded"); }}>Load sample data</button>}
+          {mode === "demo" ? (
+            <button className="btn btn-ghost" onClick={() => { exitDemo(); flash("Left demo mode"); }}>Exit demo mode</button>
+          ) : (
+            <button className="btn btn-ghost" onClick={() => { enterDemo(); flash("Demo mode on — your own data is untouched"); }}>Try demo mode</button>
+          )}
           {!confirmReset ? (
             <button className="btn btn-ghost text-alert" onClick={() => setConfirmReset(true)}>Clear all data</button>
           ) : (

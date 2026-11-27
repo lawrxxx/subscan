@@ -31,7 +31,16 @@ export default function Overview() {
   const beforePayday = inc.nextPayday ? dueBefore(subs, today, inc.nextPayday) : [];
 
   if (!ready) return null;
-  if (!subs.length) return <NoData kicker="Overview" title="What is your money already committed to?">Upload a bank or card statement and subscan will find every subscription, utility bill and regular payment in it.</NoData>;
+  // 1. Brand-new user: nothing imported, nothing added → onboarding, no figures.
+  if (!state.transactions.length && !subs.length) return <NoData kicker="Welcome to subscan" title="What is your money already committed to?">Upload a bank or card statement and subscan will find every subscription, utility bill and regular payment in it — then show what&rsquo;s due next and what you could cut.</NoData>;
+  // 2. Statement imported but nothing recurring found → say so; don't invent bills.
+  if (!subs.some((s) => s.status !== "dismissed")) return <NoRecurring />;
+
+  // 3. Thin data → every figure is labelled as a rough estimate.
+  const dates = state.transactions.map((t) => t.date).sort();
+  const spanDays = dates.length ? Math.round((Date.parse(dates[dates.length - 1]) - Date.parse(dates[0])) / 86_400_000) : 0;
+  const thin = state.transactions.length < 20 || spanDays < 75;
+  const unconfirmed = subs.filter((s) => s.status === "detected").length;
 
   const monthly = c.monthlyHome ?? 0;
   const parts = moneyParts(monthly, home);
@@ -45,7 +54,7 @@ export default function Overview() {
       <div className="flex flex-wrap items-baseline justify-between gap-2 border-b rule px-4 py-4 text-[12px] text-muted sm:px-8 lg:px-12">
         <span className="kicker">{date(today, "long")}</span>
         <span>
-          {state.dataSource === "sample" ? "Sample statement" : `${state.imports?.length ?? 1} statement${(state.imports?.length ?? 1) > 1 ? "s" : ""}`} · {state.transactions.length} transactions ·{" "}
+          {state.dataSource === "sample" ? "Demo sample statement" : `${state.imports?.length ?? 0} statement${(state.imports?.length ?? 0) === 1 ? "" : "s"}`} · {state.transactions.length} transactions{dates.length ? ` · ${date(dates[0])} – ${date(dates[dates.length - 1])}` : ""} ·{" "}
           <Link href="/onboarding" className="link">Upload another</Link>
         </span>
       </div>
@@ -53,7 +62,7 @@ export default function Overview() {
       {/* Hero: committed money */}
       <section className="grid border-b rule lg:grid-cols-[1.35fr_1fr]">
         <div className="px-4 py-10 sm:px-8 lg:border-r lg:rule lg:px-12 lg:py-14">
-          <div className="kicker mb-4">Already committed every month</div>
+          <div className="kicker mb-4">Already committed every month{thin || unconfirmed ? " · estimate" : ""}</div>
           <div className="figure flex items-start text-[72px] sm:text-[116px] xl:text-[140px]">
             <span className="mt-[0.12em] mr-1 text-[0.45em] text-muted">{parts.sym}</span>
             {parts.int}
@@ -85,6 +94,12 @@ export default function Overview() {
             {rates.USD && c.unconverted.length === 0 && <> Dollar bills converted at ₦{rates.USD.toFixed(2)} (live Textile FX{asOf ? `, ${new Date(asOf).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}` : ""}).</>}
             {c.unconverted.length > 0 && <> {c.unconverted.join(", ")} bills aren&rsquo;t in this total (no exchange rate).</>}
           </p>
+          {(thin || unconfirmed > 0) && (
+            <p className="mt-3 max-w-xl border-l-2 border-amber pl-3 text-[12px] text-ink-2">
+              {thin && <>Based on {state.transactions.length} transactions over {spanDays} days, so these totals are rough — a bill needs at least two charges to be spotted. Upload 3+ months for a fuller picture. </>}
+              {unconfirmed > 0 && <>Includes {unconfirmed} detected item{unconfirmed === 1 ? "" : "s"} you haven&rsquo;t confirmed yet.</>}
+            </p>
+          )}
         </div>
 
         <div className={`px-4 py-10 sm:px-8 lg:px-10 lg:py-14 ${missed.length ? "bg-alert-wash/40" : "bg-paper-2/60"}`}>
@@ -159,7 +174,7 @@ export default function Overview() {
         <div className="px-4 py-8 sm:px-8 lg:px-12 xl:border-r xl:rule">
           {review > 0 && (
             <Link href="/subscriptions" className="mb-8 flex items-center justify-between gap-4 border border-amber/40 bg-amber-wash/60 px-4 py-3 text-[14px] hover:border-amber">
-              <span><span className="num font-medium">{review}</span> detected items are waiting for you to confirm or dismiss.</span>
+              <span><span className="num font-medium">{review}</span> detected item{review === 1 ? " is" : "s are"} waiting for you to confirm or dismiss.</span>
               <span className="whitespace-nowrap text-[13px] text-amber">Review →</span>
             </Link>
           )}
@@ -266,6 +281,42 @@ export default function Overview() {
           </Link>
         </aside>
       </section>
+    </div>
+  );
+}
+
+/** Statement imported, but nothing repeats on a schedule. Explain — never invent bills. */
+function NoRecurring() {
+  const { state } = useStore();
+  const txs = state.transactions;
+  const dates = txs.map((t) => t.date).sort();
+  const spanDays = dates.length ? Math.round((Date.parse(dates[dates.length - 1]) - Date.parse(dates[0])) / 86_400_000) : 0;
+  const out = txs.filter((t) => (t.direction ?? "debit") === "debit").length;
+  const dismissed = state.subscriptions.filter((s) => s.status === "dismissed").length;
+  return (
+    <div className="grid border-b rule lg:grid-cols-[1.2fr_1fr]">
+      <div className="px-4 py-14 sm:px-8 lg:border-r lg:rule lg:px-12 lg:py-20">
+        <div className="kicker mb-4">Statement analysed</div>
+        <h1 className="display max-w-xl text-[40px] sm:text-[54px]">No recurring payments found yet.</h1>
+        <p className="mt-4 max-w-md text-[16px] text-ink-2">
+          We read {txs.length} transactions ({out} money out){dates.length ? ` from ${date(dates[0])} to ${date(dates[dates.length - 1])}` : ""} and didn&rsquo;t find payments that repeat on a regular schedule
+          {dismissed ? `, apart from ${dismissed} you dismissed` : ""}. We won&rsquo;t guess — nothing is shown as a bill unless the statement supports it.
+        </p>
+        <div className="mt-8 flex flex-wrap gap-3">
+          <Link href="/onboarding" className="btn btn-primary">Upload more months</Link>
+          <Link href="/subscriptions" className="btn btn-ghost">Add a bill yourself</Link>
+          <Link href="/agent?q=Show%20me%20where%20my%20money%20is%20going" className="btn btn-ghost">See where your money went</Link>
+        </div>
+      </div>
+      <div className="bg-paper-2/60 px-4 py-14 sm:px-8 lg:px-10 lg:py-20">
+        <div className="kicker mb-4">Why this can happen</div>
+        <ul className="space-y-4 text-[14px] text-ink-2">
+          <li className={spanDays < 60 ? "font-medium text-ink" : ""}>The statement covers {spanDays} days. A monthly bill needs at least two charges to be spotted — 3 to 12 months works best.</li>
+          <li>Bills paid from another account or card won&rsquo;t appear in this statement.</li>
+          <li>Prepaid purchases (airtime, electricity tokens) bought irregularly may not form a pattern.</li>
+          <li>Some rows may have been left out at the review step. Check Settings → Imported statements.</li>
+        </ul>
+      </div>
     </div>
   );
 }

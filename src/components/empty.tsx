@@ -1,11 +1,13 @@
 "use client";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { useStore } from "@/lib/db/store";
 
 /** Empty state used across pages: import your own statement, or explore with labelled sample data. */
 export function NoData({ kicker, title, children }: { kicker: string; title: string; children?: ReactNode }) {
-  const { loadSample } = useStore();
+  const { enterDemo } = useStore();
+  const router = useRouter();
   return (
     <div className="grid border-b rule lg:grid-cols-[1.2fr_1fr]">
       <div className="px-4 py-14 sm:px-8 lg:border-r lg:rule lg:px-12 lg:py-24">
@@ -14,8 +16,9 @@ export function NoData({ kicker, title, children }: { kicker: string; title: str
         <p className="mt-4 max-w-md text-[16px] text-muted">{children ?? "Upload a bank or card statement (PDF or CSV) and subscan will find every bill and subscription in it."}</p>
         <div className="mt-8 flex flex-wrap gap-3">
           <Link href="/onboarding" className="btn btn-primary">Upload a statement</Link>
-          <button className="btn btn-ghost" onClick={() => loadSample()}>Explore with sample data</button>
+          <button className="btn btn-ghost" onClick={() => { enterDemo(); router.push("/"); }}>Try demo mode</button>
         </div>
+        <p className="mt-3 max-w-md text-[12px] text-muted">Demo mode uses a made-up sample statement, kept completely separate from anything you upload. Leave it any time.</p>
       </div>
       <div className="hidden bg-paper-2/60 px-10 py-24 lg:block">
         <div className="kicker mb-4">What you&rsquo;ll see</div>

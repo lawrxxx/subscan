@@ -87,7 +87,7 @@ export default function Agent() {
   // Deep links (e.g. "Plan with the agent" on the overview) arrive as ?q=…
   const asked = useRef(false);
   useEffect(() => {
-    if (!ready || asked.current || !state.subscriptions.length) return;
+    if (!ready || asked.current || (!state.subscriptions.length && !state.transactions.length)) return;
     const q = new URLSearchParams(window.location.search).get("q");
     if (q) {
       asked.current = true;
@@ -101,12 +101,12 @@ export default function Agent() {
   const drafts = turns.flatMap((t) => t.trace ?? []).filter((t) => t.name === "prepare_payment" && !(t.result as { error?: string }).error);
   const draft = drafts[drafts.length - 1]?.result as DraftResult | undefined;
 
-  if (ready && !state.subscriptions.length)
+  if (ready && !state.subscriptions.length && !state.transactions.length)
     return (
       <div className="px-4 py-16 sm:px-8 lg:px-12">
         <div className="kicker mb-3">Agent</div>
         <h1 className="display text-[46px]">Nothing to analyse yet.</h1>
-        <p className="mt-3 text-muted">The agent works from your imported subscriptions. <Link href="/onboarding" className="link">Import a statement</Link> first.</p>
+        <p className="mt-3 text-muted">Your agent works from the statements you upload. <Link href="/onboarding" className="link">Upload a statement</Link> first, or try demo mode from the overview.</p>
       </div>
     );
 

@@ -33,7 +33,7 @@ export function Wordmark({ className = "" }: { className?: string }) {
 
 export function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
-  const { state } = useStore();
+  const { state, mode, exitDemo } = useStore();
   const w = useWallet();
   if (path.startsWith("/onboarding")) return <>{children}</>;
   return (
@@ -56,7 +56,7 @@ export function Shell({ children }: { children: ReactNode }) {
           ))}
         </nav>
         <div className="mt-auto space-y-3 px-7 pb-7 text-[12px] text-muted">
-          {state.dataSource === "sample" && <div className="tag border-amber/40 bg-amber-wash text-amber">Sample statement</div>}
+          {mode === "demo" && <div className="tag border-amber/40 bg-amber-wash text-amber">Demo mode</div>}
           <div>
             <div className="kicker mb-1">Wallet</div>
             {w.address ? (
@@ -73,16 +73,16 @@ export function Shell({ children }: { children: ReactNode }) {
       <header className="sticky top-0 z-20 flex items-center justify-between border-b rule bg-paper/95 px-4 py-3 backdrop-blur lg:hidden">
         <Wordmark className="text-[22px]" />
         <div className="flex items-center gap-2">
-          {state.dataSource === "sample" && <span className="tag border-amber/40 bg-amber-wash text-amber">Sample</span>}
+          {mode === "demo" && <span className="tag border-amber/40 bg-amber-wash text-amber">Demo</span>}
           <Link href="/settings" aria-label="Settings" className={`text-[12px] ${path.startsWith("/settings") ? "text-ink" : "text-muted"}`}>Settings</Link>
         </div>
       </header>
 
       <main className="min-w-0 pb-24 lg:pb-0">
-        {state.dataSource === "sample" && (
+        {mode === "demo" && (
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-amber/30 bg-amber-wash/70 px-4 py-2 text-[12px] text-amber sm:px-8 lg:px-12">
-            <span><strong className="font-semibold">Sample data.</strong> These subscriptions come from a made-up statement, not your accounts.</span>
-            <Link href="/onboarding" className="underline underline-offset-2">Import your own statement →</Link>
+            <span><strong className="font-semibold">Demo mode.</strong> Everything here comes from a made-up sample statement — none of it is your money.</span>
+            <button onClick={exitDemo} className="underline underline-offset-2">Exit demo</button>
           </div>
         )}
         {children}

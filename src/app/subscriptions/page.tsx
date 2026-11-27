@@ -54,7 +54,7 @@ export default function Subscriptions() {
   const shown = spendSummary(list.filter((s) => s.status !== "dismissed"), home, rates);
 
   if (!ready) return null;
-  if (!subs.length) return <NoData kicker="Subscriptions" title="No subscriptions detected yet." />;
+  if (!subs.length && !state.transactions.length) return <NoData kicker="Bills & subscriptions" title="No bills yet.">Upload a statement to find your subscriptions, utility bills and other regular payments — or switch on demo mode to look around.</NoData>;
 
   const reviewIds = list.filter((s) => s.status === "detected" && s.confidence >= 0.85).map((s) => s.id);
 
@@ -138,7 +138,7 @@ export default function Subscriptions() {
             <button className="btn btn-ghost h-8 bg-paper" onClick={() => reviewIds.forEach((id) => updateSubscription(id, { status: "confirmed" }))}>Confirm all {reviewIds.length}</button>
           </div>
         )}
-        <Ledger list={list} home={home} rates={rates} onStatus={(id, s) => updateSubscription(id, { status: s })} empty={q ? `Nothing matches “${q}”.` : "Nothing in this view."} />
+        <Ledger list={list} home={home} rates={rates} onStatus={(id, s) => updateSubscription(id, { status: s })} empty={q ? `Nothing matches “${q}”.` : !subs.length ? "No recurring payments were found in your statement. If you pay a bill that didn’t show up, add it yourself." : "Nothing in this view."} />
         <p className="mt-4 text-[12px] text-muted">
           {list.length} shown · amounts in billing currency; yearly totals in {home}
           {rates.USD ? ` (USD at ₦${rates.USD.toFixed(2)}, live Textile FX)` : ""}.

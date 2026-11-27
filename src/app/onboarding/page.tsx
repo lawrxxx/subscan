@@ -33,7 +33,7 @@ const ROLES: { key: keyof ColumnMapping; label: string; required?: boolean }[] =
 
 export default function UploadStatement() {
   const router = useRouter();
-  const { state, importRows, loadSample, updateSettings } = useStore();
+  const { state, importRows, enterDemo, exitDemo, mode, updateSettings } = useStore();
   const home = state.settings.homeCurrency;
   const [step, setStep] = useState<Step>({ kind: "pick" });
   const [error, setError] = useState<string>();
@@ -56,7 +56,7 @@ export default function UploadStatement() {
         return setStep({ kind: "pick" });
       }
       // Mark rows we already have so the same statement can't be imported twice.
-      const rows = flagInFileRepeats(markDuplicates(result.rows, state.dataSource === "sample" ? [] : state.transactions));
+      const rows = flagInFileRepeats(markDuplicates(result.rows, state.transactions));
       setStep({ kind: "review", file, result, rows });
     } catch (e) {
       if (e instanceof PdfPasswordError) return setStep({ kind: "password", file, incorrect: e.incorrect });
@@ -146,6 +146,13 @@ export default function UploadStatement() {
                   <button className="btn btn-ghost" onClick={() => setStep({ kind: "pick" })}>Cancel</button>
                 </div>
               </div>
+            ) : mode === "demo" ? (
+              <div className="border border-amber/40 bg-amber-wash/50 px-6 py-10">
+                <div className="kicker mb-2 text-amber">Demo mode is on</div>
+                <div className="display text-[28px]">Leave the demo to upload your own statement.</div>
+                <p className="mt-2 max-w-sm text-[14px] text-muted">The demo&rsquo;s sample data is discarded. Anything you uploaded before is still there.</p>
+                <button className="btn btn-primary mt-6" onClick={exitDemo}>Exit demo and upload</button>
+              </div>
             ) : (
               <>
                 <div
@@ -173,7 +180,8 @@ export default function UploadStatement() {
                   </label>
                   <div className="text-[12px] text-muted">
                     No statement handy?
-                    <button className="btn btn-ghost mt-1 w-full" onClick={() => { loadSample(); router.push("/"); }}>Explore with a sample statement</button>
+                    <button className="btn btn-ghost mt-1 w-full" onClick={() => { enterDemo(); router.push("/"); }}>Try demo mode</button>
+                    <span className="mt-1 block text-[11px] text-faint">Made-up sample data, kept separate from yours.</span>
                   </div>
                 </div>
                 <p className="mt-6 text-[12px] text-muted">Supported: CSV exports from any bank or card, and digital PDF statements with a transactions table (date, description, debit/credit or amount, balance). Scanned images aren&rsquo;t supported yet.</p>

@@ -23,7 +23,7 @@ const fmt = (atomic: string | bigint, t: TokenSymbol, dp = t === "cNGN" ? 2 : 4)
 
 export default function Pay() {
   const { id } = useParams<{ id: string }>();
-  const { state, ready, upsertPayment } = useStore();
+  const { state, ready, upsertPayment, mode } = useStore();
   const w = useWallet();
   const sub = state.subscriptions.find((s) => s.id === decodeURIComponent(id));
 
@@ -86,6 +86,7 @@ export default function Pay() {
   const insufficient = needSource !== null && haveSource !== null && haveSource < needSource;
   const noLiquidity = plan.needsConversion && preview?.status === "no_quote";
   const blockers = [
+    ...(mode === "demo" ? ["Demo mode: this bill comes from sample data. Exit demo mode to pay your own bills."] : []),
     ...plan.problems,
     ...(x402Err ? [x402Err] : []),
     ...(!w.address ? ["Connect a Celo wallet to continue."] : []),
