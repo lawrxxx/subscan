@@ -10,7 +10,7 @@ export interface Transaction {
   merchant: string; // normalised merchant key/label
   amount: number; // positive = money out
   currency: Currency;
-  source: "csv" | "sample";
+  source: "csv" | "sample" | "mono";
 }
 
 export type Frequency = "weekly" | "monthly" | "quarterly" | "yearly";
@@ -95,6 +95,8 @@ export interface AppSettings {
   agentId?: string;
   agentRegistrationTx?: `0x${string}`;
   payGasInUsdt: boolean;
+  displayName?: string;
+  onboarded?: boolean;
 }
 
 export interface AppState {
@@ -103,5 +105,5 @@ export interface AppState {
   payments: PaymentRecord[];
   settings: AppSettings;
   importedAt?: string;
-  dataSource?: "csv" | "sample";
+  dataSource?: "csv" | "sample" | "mono";
 }

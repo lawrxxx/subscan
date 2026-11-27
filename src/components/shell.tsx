@@ -33,9 +33,9 @@ export function Wordmark({ className = "" }: { className?: string }) {
 
 export function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
-  const { state } = useStore();
+  const { state, mode, user, syncing, error, clearError, loadError, reload, ready, signOut } = useStore();
   const w = useWallet();
-  if (path.startsWith("/onboarding")) return <>{children}</>;
+  if (["/onboarding", "/login", "/signup", "/reset", "/auth"].some((p) => path.startsWith(p))) return <>{children}</>;
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-[236px_1fr]">
       <aside className="hidden border-r rule lg:flex lg:flex-col lg:sticky lg:top-0 lg:h-dvh">
@@ -58,6 +58,17 @@ export function Shell({ children }: { children: ReactNode }) {
         <div className="mt-auto space-y-3 px-7 pb-7 text-[12px] text-muted">
           {state.dataSource === "sample" && <div className="tag border-amber/40 bg-amber-wash text-amber">Sample statement</div>}
           <div>
+            <div className="kicker mb-1">{mode === "account" ? "Signed in" : "Guest mode"}</div>
+            {mode === "account" ? (
+              <div className="space-y-1">
+                <div className="truncate text-ink-2" title={user?.email}>{state.settings.displayName || user?.email || "…"}</div>
+                <button onClick={() => void signOut()} className="link">Sign out</button>
+              </div>
+            ) : (
+              <div>Data stays on this device.</div>
+            )}
+          </div>
+          <div>
             <div className="kicker mb-1">Wallet</div>
             {w.address ? (
               <div className="font-mono text-[12px] text-ink-2">
@@ -79,13 +90,31 @@ export function Shell({ children }: { children: ReactNode }) {
       </header>
 
       <main className="min-w-0 pb-24 lg:pb-0">
+        {error && (
+          <div role="alert" className="flex items-center justify-between gap-4 border-b border-alert/30 bg-alert-wash px-4 py-2 text-[13px] text-alert sm:px-8 lg:px-12">
+            <span>Couldn&rsquo;t save that change: {error}</span>
+            <button onClick={clearError} className="underline underline-offset-2">Dismiss</button>
+          </div>
+        )}
+        {syncing && <div className="fixed right-4 top-3 z-30 hidden items-center gap-2 border rule bg-paper px-2.5 py-1 text-[11px] text-muted lg:flex"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />Saving</div>}
         {state.dataSource === "sample" && (
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-amber/30 bg-amber-wash/70 px-4 py-2 text-[12px] text-amber sm:px-8 lg:px-12">
             <span><strong className="font-semibold">Sample data.</strong> These subscriptions come from a made-up statement, not your accounts.</span>
             <Link href="/onboarding" className="underline underline-offset-2">Import your own statement →</Link>
           </div>
         )}
-        {children}
+        {loadError ? (
+          <div className="px-4 py-20 sm:px-8 lg:px-12">
+            <div className="kicker mb-3 text-alert">Connection problem</div>
+            <h1 className="display text-[40px]">We couldn&rsquo;t load your account.</h1>
+            <p className="mt-3 max-w-md text-[14px] text-muted">{loadError}</p>
+            <button className="btn btn-primary mt-6" onClick={() => void reload()}>Try again</button>
+          </div>
+        ) : !ready ? (
+          <PageSkeleton />
+        ) : (
+          children
+        )}
       </main>
 
       <nav className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-5 border-t rule bg-paper/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">
@@ -110,6 +139,21 @@ export function PageHeader({ kicker, title, children, aside }: { kicker?: string
           {children && <div className="mt-3 max-w-xl text-[15px] text-muted">{children}</div>}
         </div>
         {aside}
+      </div>
+    </div>
+  );
+}
+
+export function PageSkeleton() {
+  return (
+    <div className="animate-pulse px-4 py-10 sm:px-8 lg:px-12" aria-busy="true" aria-label="Loading">
+      <div className="h-3 w-32 bg-stone" />
+      <div className="mt-5 h-12 w-2/3 max-w-xl bg-stone" />
+      <div className="mt-10 grid gap-px sm:grid-cols-3">
+        {[0, 1, 2].map((i) => <div key={i} className="h-24 bg-paper-2" />)}
+      </div>
+      <div className="mt-10 space-y-3">
+        {[0, 1, 2, 3, 4].map((i) => <div key={i} className="h-10 bg-paper-2" />)}
       </div>
     </div>
   );

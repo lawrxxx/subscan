@@ -31,18 +31,25 @@ const TOOL_LABEL: Record<string, string> = {
   propose_subscription_changes: "Proposed subscription changes",
 };
 
-// Only what the agent's tools need is sent; raw statement rows stay on device.
+// Guest mode: only what the agent's tools need is sent; raw statement rows stay on device.
+// Account mode: the server reads your data from the database and ignores this.
 function snapshot(state: AppState): AppState {
   return { ...state, transactions: [], subscriptions: state.subscriptions.map((s) => ({ ...s, history: s.history.slice(-12) })) };
 }
 
 export default function Agent() {
-  const { state, ready, updateSubscription } = useStore();
+  const { state, ready, updateSubscription, mode } = useStore();
+  const [history, setHistory] = useState<{ id: number; question: string; created_at: string; mode: string }[]>([]);
   const [applied, setApplied] = useState<Record<string, boolean>>({});
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const end = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (mode !== "account") return;
+    fetch("/api/agent/history").then((r) => r.json()).then((j) => setHistory(j.data ?? [])).catch(() => {});
+  }, [mode, turns.length]);
 
   useEffect(() => {
     end.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -59,7 +66,7 @@ export default function Agent() {
       const r = await fetch("/api/agent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: next.filter((t) => !t.error).map(({ role, content }) => ({ role, content })), state: snapshot(state) }),
+        body: JSON.stringify({ messages: next.filter((t) => !t.error).map(({ role, content }) => ({ role, content })), state: mode === "guest" ? snapshot(state) : undefined }),
       });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error ?? "Agent unavailable");
@@ -174,6 +181,19 @@ export default function Agent() {
       <aside className="hidden px-8 py-8 xl:block">
         <div className="kicker mb-4">Payment draft</div>
         {draft ? <Draft d={draft} /> : <p className="text-[13px] text-muted">Ask the agent to prepare a payment. Drafts appear here for review — nothing is sent until you approve on the payment screen.</p>}
+        {history.length > 0 && (
+          <div className="mt-10 border-t rule pt-6">
+            <div className="kicker mb-3">Earlier questions</div>
+            <ul className="space-y-2 text-[13px]">
+              {history.slice(0, 8).map((h) => (
+                <li key={h.id}>
+                  <button className="text-left text-ink-2 hover:text-ink hover:underline" onClick={() => ask(h.question)} disabled={busy}>{h.question}</button>
+                  <div className="text-[11px] text-faint">{new Date(h.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short" })} · {h.mode === "claude" ? "Claude" : "local"}</div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <div className="mt-10 border-t rule pt-6">
           <div className="kicker mb-3">Tools available</div>
           <ul className="space-y-1.5 text-[13px] text-ink-2">

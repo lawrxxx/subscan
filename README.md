@@ -6,13 +6,20 @@ Subscription intelligence and payment agent on Celo mainnet. Import a statement 
 
 ```bash
 npm install
-cp .env.example .env.local   # all optional; see below
-npm run dev                  # http://localhost:3000
+cp .env.example .env.local
+npm run dev
 ```
 
-Checks: `npm run typecheck`, `npm test` (detection engine), `npm run build`.
+Without Supabase variables the app runs in **guest mode** (data stays in the browser). With them, sign-in is required and all data is stored per user in Supabase with row-level security.
 
-Behind an HTTP proxy, start Node with `NODE_USE_ENV_PROXY=1` so server-side fetches (Textile FX, Celo RPC) use it.
+Checks: `npm run typecheck`, `npm test`, `npm run build`.
+
+## Production setup (Supabase + Vercel)
+
+1. **Supabase** → create a project → SQL editor → run `supabase/migrations/20261127000000_init.sql`.
+2. Supabase → Authentication → URL configuration: Site URL = your Vercel URL; add `https://<your-domain>/auth/callback` to Redirect URLs.
+3. **Vercel** → Project → Settings → Environment Variables (Production): `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and optionally `ANTHROPIC_API_KEY`, `MONO_SECRET_KEY`, `MONO_WEBHOOK_SECRET`. Redeploy.
+4. **Mono** (optional) → dashboard → webhook URL `https://<your-domain>/api/mono/webhook`, secret = `MONO_WEBHOOK_SECRET`.
 
 ## Layout
 
@@ -24,8 +31,10 @@ Behind an HTTP proxy, start Node with `NODE_USE_ENV_PROXY=1` so server-side fetc
 | `src/lib/textile/` | Textile FX v2 RFQ client, TakerControl proof signing |
 | `src/lib/merchant/` | x402 probe/pay (official `@x402/*` packages) |
 | `src/lib/payments/` | Payment planning and step-by-step execution |
-| `src/lib/db/` | Local store (browser) and optional Supabase receipt mirror (`supabase/schema.sql`) |
-| `src/lib/bank/` | Bank data providers: CSV (working), Mono (slot, not implemented) |
+| `src/lib/db/` | Client store (account/guest), zod schemas, Supabase repository |
+| `src/lib/supabase/` | Browser/server/admin clients; `src/middleware.ts` protects routes |
+| `src/lib/mono/` | Mono Connect: initiate, webhook, transaction sync |
+| `supabase/migrations/` | Schema + row-level security |
 | `scripts/register-agent.ts` | ERC-8004 Identity Registry registration |
 
 ## Verified integration constants (Celo, chain 42220)
