@@ -24,8 +24,7 @@ Checks: `npm run typecheck`, `npm test`, `npm run build`.
 
 ## Deploy (Vercel)
 
-Import the repo in Vercel (framework: Next.js, defaults). In Settings → Environment Variables set, as needed:
-`NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_CELO_ATTRIBUTION_CODE` (your assigned hackathon code), `TEXTILE_API_KEY`, `ANTHROPIC_API_KEY`, `ERC8004_AGENT_ID`. Redeploy after changing `NEXT_PUBLIC_*` values.
+Import the repo in Vercel (framework: Next.js, defaults). Manage environment variables with `npm run env:sync` (see below); `GEMINI_API_KEY` is the only required one. Redeploy after changing `NEXT_PUBLIC_*` values.
 
 ## Environment variables (Vercel CLI)
 
