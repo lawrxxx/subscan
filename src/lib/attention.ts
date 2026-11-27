@@ -18,19 +18,19 @@ export function attentionItems(state: AppState, today: string): AttentionItem[] 
   const items: AttentionItem[] = [];
   const live = state.subscriptions.filter((s) => s.status !== "dismissed");
   for (const p of state.payments.filter((p) => p.status === "failed").slice(0, 3))
-    items.push({ id: `pf-${p.id}`, severity: "high", title: `Payment to ${p.merchant} failed`, detail: p.steps.find((s) => s.error)?.error ?? "A step didn’t complete.", href: `/activity/${p.id}`, action: "View" });
+    items.push({ id: `pf-${p.id}`, severity: "high", title: `Payment to ${p.merchant} failed`, detail: p.steps.find((s) => s.error)?.error ?? "A step didn’t complete.", href: `/wallet/${p.id}`, action: "View" });
   for (const s of live.filter((s) => s.missed && !s.lapsed))
-    items.push({ id: `m-${s.id}`, severity: "high", title: `${s.displayName}: expected payment missing`, detail: `Usually charged around ${s.missed!.expected}, but it isn’t in your statement.`, href: `/bills/${encodeURIComponent(s.id)}`, action: "Review" });
+    items.push({ id: `m-${s.id}`, severity: "high", title: `${s.displayName}: expected payment missing`, detail: `Usually charged around ${s.missed!.expected}, but it isn’t in your statement.`, href: `/payments/${encodeURIComponent(s.id)}`, action: "Review" });
   const review = live.filter((s) => s.status === "detected");
-  if (review.length) items.push({ id: "review", severity: "medium", title: `Check ${review.length} suggested recurring payment${review.length === 1 ? "" : "s"}`, detail: "Confirm the ones you really pay so your totals are right.", href: "/review", action: "Review" });
+  if (review.length) items.push({ id: "review", severity: "medium", title: `Check ${review.length} payment${review.length === 1 ? "" : "s"} we found`, detail: "Confirm the ones you really pay so your totals are right.", href: "/review", action: "Review" });
   for (const p of state.payments.filter((p) => p.status === "prepared").slice(0, 3))
     items.push({ id: `pd-${p.id}`, severity: "medium", title: `Finish paying ${p.merchant}`, detail: `Draft for ${p.destinationAmount} ${p.destinationToken} — nothing has been sent yet.`, href: `/pay/${encodeURIComponent(p.subscriptionId)}`, action: "Continue" });
   for (const s of live.filter((s) => s.unusual))
-    items.push({ id: `u-${s.id}`, severity: "medium", title: `${s.displayName} was unusually high`, detail: `Latest ${s.unusual!.amount.toLocaleString()} vs usual ${Math.round(s.unusual!.typical).toLocaleString()} ${s.currency}.`, href: `/bills/${encodeURIComponent(s.id)}`, action: "Check" });
+    items.push({ id: `u-${s.id}`, severity: "medium", title: `${s.displayName} was unusually high`, detail: `Latest ${s.unusual!.amount.toLocaleString()} vs usual ${Math.round(s.unusual!.typical).toLocaleString()} ${s.currency}.`, href: `/payments/${encodeURIComponent(s.id)}`, action: "Check" });
   for (const s of live.filter((s) => s.priceChange && s.priceChange.pct > 0 && Date.parse(today) - Date.parse(s.priceChange.date) < 120 * DAY))
-    items.push({ id: `p-${s.id}`, severity: "low", title: `${s.displayName} went up ${Math.round(s.priceChange!.pct * 100)}%`, detail: `From ${s.priceChange!.from.toLocaleString()} to ${s.priceChange!.to.toLocaleString()} ${s.currency} on ${s.priceChange!.date}.`, href: `/bills/${encodeURIComponent(s.id)}`, action: "View" });
+    items.push({ id: `p-${s.id}`, severity: "low", title: `${s.displayName} went up ${Math.round(s.priceChange!.pct * 100)}%`, detail: `From ${s.priceChange!.from.toLocaleString()} to ${s.priceChange!.to.toLocaleString()} ${s.currency} on ${s.priceChange!.date}.`, href: `/payments/${encodeURIComponent(s.id)}`, action: "View" });
   for (const s of live.filter((s) => !s.lapsed && !s.missed && dueIn(s, today) <= 3 && dueIn(s, today) >= 0))
-    items.push({ id: `d-${s.id}`, severity: "low", title: `${s.displayName} due ${dueIn(s, today) === 0 ? "today" : dueIn(s, today) === 1 ? "tomorrow" : `in ${dueIn(s, today)} days`}`, detail: `${s.billType === "variable" ? "About " : ""}${s.amount.toLocaleString()} ${s.currency}.`, href: `/bills/${encodeURIComponent(s.id)}`, action: "Open" });
+    items.push({ id: `d-${s.id}`, severity: "low", title: `${s.displayName} due ${dueIn(s, today) === 0 ? "today" : dueIn(s, today) === 1 ? "tomorrow" : `in ${dueIn(s, today)} days`}`, detail: `${s.billType === "variable" ? "About " : ""}${s.amount.toLocaleString()} ${s.currency}.`, href: `/payments/${encodeURIComponent(s.id)}`, action: "Open" });
   const rank = { high: 0, medium: 1, low: 2 };
   return items.sort((a, b) => rank[a.severity] - rank[b.severity]);
 }

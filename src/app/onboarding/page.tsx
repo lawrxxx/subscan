@@ -30,7 +30,7 @@ const ROLES: { key: keyof ColumnMapping; label: string; required?: boolean }[] =
   { key: "currency", label: "Currency" },
 ];
 
-const STEPS = ["Upload", "Check transactions", "Review payments"];
+const STEPS = ["Add statement", "Check transactions", "Check payments"];
 
 function Progress({ at }: { at: number }) {
   return (
@@ -97,8 +97,7 @@ export default function UploadStatement() {
 
   function save() {
     if (step.kind !== "review") return;
-    const before = new Set(state.subscriptions.map((s) => s.id));
-    const { record, subscriptions } = importRows(step.rows, { fileName: step.file.name, format: step.result.format, source: step.result.format.startsWith("PDF") ? "pdf" : "csv" });
+    const { subscriptions } = importRows(step.rows, { fileName: step.file.name, format: step.result.format, source: step.result.format.startsWith("PDF") ? "pdf" : "csv" });
     updateSettings({ onboarded: true });
     router.push(subscriptions.some((x) => !x.manual) ? "/review" : "/?imported=none");
   }
@@ -118,7 +117,7 @@ export default function UploadStatement() {
       ) : (
         <div className="mx-auto max-w-[640px] space-y-5 px-4 py-8 sm:px-6 lg:py-12">
           <section>
-            <h1 className="title text-[24px]">Upload a statement</h1>
+            <h1 className="title text-[22px] sm:text-[24px]">Add your bank statement</h1>
             <p className="mt-1 text-[14px] text-ink-2">We&rsquo;ll pull out the transactions, find what repeats, and let you check everything before it&rsquo;s saved.</p>
 
             <div className="panel mt-5">

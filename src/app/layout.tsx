@@ -9,8 +9,8 @@ import "./globals.css";
 import { Providers } from "./providers";
 
 export const metadata: Metadata = {
-  title: "subscan — subscription intelligence",
-  description: "Discover recurring subscriptions, understand spend and settle cross-currency payments on Celo.",
+  title: "subscan · your money, made simple",
+  description: "See what you spend, which payments are coming up and where you could save.",
   icons: { icon: "/icon.svg" },
 };
 

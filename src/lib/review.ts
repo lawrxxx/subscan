@@ -7,7 +7,7 @@ import type { Frequency, ObligationKind, Subscription, Transaction } from "./typ
 const DAY = 86_400_000;
 
 export type Level = "likely" | "possible" | "review";
-export const LEVEL_LABEL: Record<Level, string> = { likely: "Likely recurring", possible: "Possible recurring payment", review: "Needs your review" };
+export const LEVEL_LABEL: Record<Level, string> = { likely: "Very likely regular", possible: "Possibly regular", review: "Not sure, please check" };
 
 /** Gaps in days between consecutive charges. */
 export function gaps(s: Subscription) {

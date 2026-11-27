@@ -78,7 +78,7 @@ export default function Pay() {
   const [err, setErr] = useState<string>();
 
   if (!ready) return null;
-  if (!sub || !plan) return <Missing what="subscription" back="/bills" backLabel="All bills" />;
+  if (!sub || !plan) return <Missing what="subscription" back="/payments" backLabel="All bills" />;
 
   const srcTok = plan.sourceToken!;
   const dstTok = plan.destinationToken;
@@ -124,7 +124,7 @@ export default function Pay() {
       from: w.address,
     });
     setDraftSaved(true);
-    logAction({ kind: "payment-prepared", title: `Prepared payment to ${sub.displayName}`, detail: `${fmt(destAtomic, dstTok)} ${TOKENS[dstTok].display} · not signed`, href: "/activity?tab=payments" });
+    logAction({ kind: "payment-prepared", title: `Prepared payment to ${sub.displayName}`, detail: `${fmt(destAtomic, dstTok)} ${TOKENS[dstTok].display} · not signed`, href: "/wallet" });
   }
 
   async function run() {
@@ -204,7 +204,7 @@ export default function Pay() {
       }
       step("settlement", { status: "confirmed" });
       save({ status: "confirmed" });
-      logAction({ kind: "payment-sent", title: `Paid ${sub!.displayName}`, detail: `${rec.destinationAmount} ${TOKENS[dstTok].display} confirmed on Celo`, href: `/activity/${rec.id}` });
+      logAction({ kind: "payment-sent", title: `Paid ${sub!.displayName}`, detail: `${rec.destinationAmount} ${TOKENS[dstTok].display} confirmed on Celo`, href: `/wallet/${rec.id}` });
       void w.refresh();
     } catch (e) {
       const msg = e instanceof Error ? (e as { shortMessage?: string }).shortMessage ?? e.message : String(e);
@@ -225,8 +225,8 @@ export default function Pay() {
   return (
     <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
       <div className="mb-4 text-[13px]">
-        <Link href="/bills" className="text-muted link">Bills</Link> <span className="text-faint">/</span>{" "}
-        <Link href={`/bills/${encodeURIComponent(sub.id)}`} className="text-muted link">{sub.displayName}</Link> <span className="text-faint">/</span> Pay
+        <Link href="/payments" className="text-muted link">Bills</Link> <span className="text-faint">/</span>{" "}
+        <Link href={`/payments/${encodeURIComponent(sub.id)}`} className="text-muted link">{sub.displayName}</Link> <span className="text-faint">/</span> Pay
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
@@ -340,13 +340,13 @@ export default function Pay() {
                   </>
                 )}
                 {w.error && <p className="mt-2 text-[12px] text-alert">{w.error}</p>}
-                {!recipient && <Link href={`/bills/${encodeURIComponent(sub.id)}#settlement`} className="btn btn-ghost mt-3 w-full">Add recipient details</Link>}
+                {!recipient && <Link href={`/payments/${encodeURIComponent(sub.id)}#settlement`} className="btn btn-ghost mt-3 w-full">Add recipient details</Link>}
               </div>
               <div className="border-t rule px-4 py-4 sm:px-5">
                 <div className="text-[13px] font-medium">Not ready yet?</div>
                 <p className="mt-0.5 mb-3 text-[12px] text-muted">Save a draft. Nothing is signed or sent; it shows in Activity as a draft.</p>
                 <button className="btn btn-ghost w-full" disabled={!destAtomic || !dstTok || draftSaved} onClick={saveDraft}>{draftSaved ? "Draft saved" : "Save as draft"}</button>
-                {draftSaved && <Link href="/activity?tab=payments" className="mt-2 block text-center text-[12px] link">View in Activity</Link>}
+                {draftSaved && <Link href="/wallet" className="mt-2 block text-center text-[12px] link">View in Activity</Link>}
               </div>
             </div>
           ) : (
@@ -400,7 +400,7 @@ function Progress({ record, running, err }: { record: PaymentRecord; running: bo
       </ol>
       {!running && (
         <div className="flex gap-2 border-t rule px-4 py-3 sm:px-5">
-          <Link href={`/activity/${record.id}`} className="btn btn-primary btn-sm">View receipt</Link>
+          <Link href={`/wallet/${record.id}`} className="btn btn-primary btn-sm">View receipt</Link>
           <Link href="/" className="btn btn-ghost btn-sm">Overview</Link>
         </div>
       )}

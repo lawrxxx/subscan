@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { EditPayment } from "@/components/edit-payment";
 import { Wordmark } from "@/components/shell";
 import { useStore } from "@/lib/db/store";
 import { date, money } from "@/lib/format";
@@ -8,19 +9,15 @@ import {
   amountsVary,
   bulkEligible,
   displayLabel,
-  editPatch,
   explain,
   frequencyText,
-  GROUP_LABEL,
-  groupOf,
   level,
   LEVEL_LABEL,
   predictedNext,
   rawDescription,
-  type Group,
   type Level,
 } from "@/lib/review";
-import type { Frequency, Subscription } from "@/lib/types";
+import type { Subscription } from "@/lib/types";
 
 const RANK: Record<Level, number> = { likely: 0, possible: 1, review: 2 };
 const LEVEL_TONE: Record<Level, string> = { likely: "text-accent", possible: "text-ink-2", review: "text-amber" };
@@ -29,9 +26,11 @@ export default function Review() {
   const { state, ready, updateSubscription, logAction } = useStore();
   const [bulkOpen, setBulkOpen] = useState(false);
   const [showDone, setShowDone] = useState<"confirmed" | "dismissed" | null>(null);
+  const [mode, setMode] = useState<"one" | "all">("one");
+  const [skipped, setSkipped] = useState<string[]>([]);
 
   const all = useMemo(() => state.subscriptions.filter((s) => !s.manual), [state.subscriptions]);
-  const pending = useMemo(() => all.filter((s) => s.status === "detected").sort((a, b) => RANK[level(a)] - RANK[level(b)] || b.amount - a.amount), [all]);
+  const pending = useMemo(() => all.filter((s) => s.status === "detected").sort((a, b) => skipped.indexOf(a.id) - skipped.indexOf(b.id) || RANK[level(a)] - RANK[level(b)] || b.amount - a.amount), [all, skipped]);
   const confirmed = all.filter((s) => s.status === "confirmed");
   const dismissed = all.filter((s) => s.status === "dismissed");
   const eligible = pending.filter(bulkEligible);
@@ -41,11 +40,11 @@ export default function Review() {
 
   const set = (s: Subscription, status: Subscription["status"], name: string) => {
     updateSubscription(s.id, { status });
-    logAction({ kind: status === "confirmed" ? "confirmed" : status === "dismissed" ? "dismissed" : "restored", title: `${status === "confirmed" ? "Confirmed" : status === "dismissed" ? "Marked not recurring:" : "Moved back to review:"} ${name}`, href: `/bills/${encodeURIComponent(s.id)}` });
+    logAction({ kind: status === "confirmed" ? "confirmed" : status === "dismissed" ? "dismissed" : "restored", title: `${status === "confirmed" ? "Confirmed" : status === "dismissed" ? "Marked not regular:" : "Moved back to review:"} ${name}`, href: `/payments/${encodeURIComponent(s.id)}` });
   };
   const confirmEligible = () => {
     eligible.forEach((s) => updateSubscription(s.id, { status: "confirmed" }));
-    logAction({ kind: "confirmed", title: `Confirmed ${eligible.length} likely recurring payment${eligible.length === 1 ? "" : "s"}`, detail: eligible.map((s) => s.displayName).join(", "), href: "/bills" });
+    logAction({ kind: "confirmed", title: `Confirmed ${eligible.length} regular payment${eligible.length === 1 ? "" : "s"}`, detail: eligible.map((s) => s.displayName).join(", "), href: "/payments" });
     setBulkOpen(false);
   };
 
@@ -59,14 +58,14 @@ export default function Review() {
       </header>
 
       <main className="mx-auto max-w-3xl px-4 pt-5 pb-[calc(88px+env(safe-area-inset-bottom))] sm:px-6">
-        <h1 className="title text-[21px] sm:text-[24px]">Check your recurring payments</h1>
-        <p className="mt-1 text-[14px] text-ink-2">These payments showed up more than once in your statement. Confirm the ones you really pay regularly so your totals are right.</p>
+        <h1 className="title text-[21px] sm:text-[24px]">Check your payments</h1>
+        <p className="mt-1 text-[14px] text-ink-2">These came up more than once in your statement. Tell us which ones you pay regularly.</p>
 
         {all.length > 0 && (
           <div className="mt-4">
             <div className="flex items-baseline justify-between text-[13px]">
               <span className="font-medium"><span className="num">{done}</span> of <span className="num">{all.length}</span> reviewed</span>
-              <span className="text-muted">{confirmed.length} confirmed · {dismissed.length} not recurring · {pending.length} left</span>
+              <span className="text-muted">{confirmed.length} regular · {dismissed.length} not regular</span>
             </div>
             <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-paper-2" role="progressbar" aria-valuemin={0} aria-valuemax={all.length} aria-valuenow={done} aria-label="Review progress">
               <div className="h-full bg-accent transition-[width]" style={{ width: `${all.length ? (done / all.length) * 100 : 0}%` }} />
@@ -77,10 +76,10 @@ export default function Review() {
         {!all.length ? (
           <div className="mt-6 border-y rule py-5 text-[14px]">
             <p className="font-medium">No repeating payments found.</p>
-            <p className="mt-1 text-muted">A payment needs to appear at least twice before we suggest it. Uploading three or more months usually helps.</p>
+            <p className="mt-1 text-muted">A payment needs to appear at least twice before we suggest it. Adding three or more months usually helps.</p>
             <div className="mt-4 flex flex-wrap gap-2">
-              <Link href="/onboarding" className="btn btn-ghost">Upload another statement</Link>
-              <Link href="/bills?add=1" className="btn btn-ghost">Add a payment yourself</Link>
+              <Link href="/onboarding" className="btn btn-ghost">Add another statement</Link>
+              <Link href="/payments?add=1" className="btn btn-ghost">Add a payment yourself</Link>
             </div>
           </div>
         ) : (
@@ -89,7 +88,7 @@ export default function Review() {
               <div className="mt-4 rounded-[6px] border rule bg-surface">
                 {!bulkOpen ? (
                   <div className="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="text-[13px] text-ink-2"><span className="font-medium text-ink">{eligible.length} look clearly recurring</span>: three or more payments at a steady interval.</p>
+                    <p className="text-[13px] text-ink-2"><span className="font-medium text-ink">{eligible.length} are very likely regular</span>: they came in three or more times, evenly spaced.</p>
                     <button className="btn btn-ghost btn-sm shrink-0" onClick={() => setBulkOpen(true)}>Review and confirm {eligible.length}</button>
                   </div>
                 ) : (
@@ -114,9 +113,19 @@ export default function Review() {
             )}
 
             {pending.length > 0 ? (
-              <ul className="mt-4 divide-y divide-[var(--color-rule)] border-y rule" aria-label="Suggestions awaiting review">
-                {pending.map((s) => <Suggestion key={s.id} s={s} raw={rawDescription(s, state.transactions)} onStatus={set} onSave={(p, name) => { updateSubscription(s.id, { ...p, status: "confirmed" }); logAction({ kind: "confirmed", title: `Edited and confirmed ${name}`, href: `/bills/${encodeURIComponent(s.id)}` }); }} />)}
+              <>
+              {pending.length > 1 && (
+                <div className="mt-4 flex justify-end text-[12.5px] text-muted">
+                  <button className="hover:text-ink" onClick={() => setMode(mode === "one" ? "all" : "one")}>{mode === "one" ? `See all ${pending.length} at once` : "One at a time"}</button>
+                </div>
+              )}
+              <ul className="mt-1.5 divide-y divide-[var(--color-rule)] border-y rule" aria-label="Suggestions awaiting review">
+                {(mode === "one" ? pending.slice(0, 1) : pending).map((s) => <Suggestion key={s.id} s={s} raw={rawDescription(s, state.transactions)} onStatus={set} onSave={(p, name) => { updateSubscription(s.id, { ...p, status: "confirmed" }); logAction({ kind: "confirmed", title: `Edited and confirmed ${name}`, href: `/payments/${encodeURIComponent(s.id)}` }); }} />)}
               </ul>
+              {mode === "one" && pending.length > 1 && (
+                <button className="mt-2 text-[13px] text-muted hover:text-ink" onClick={() => setSkipped((k) => [...k.filter((x) => x !== pending[0].id), pending[0].id])}>Not sure, skip for now</button>
+              )}
+              </>
             ) : (
               <div className="mt-5 rounded-[6px] bg-accent-wash px-4 py-3 text-[14px]">
                 <span className="font-medium">All done.</span> You&rsquo;ve reviewed every suggestion.
@@ -125,7 +134,7 @@ export default function Review() {
 
             {(confirmed.length > 0 || dismissed.length > 0) && (
               <div className="mt-6 space-y-2">
-                {([["confirmed", "Confirmed", confirmed], ["dismissed", "Not recurring", dismissed]] as const).map(([k, label, list]) =>
+                {([["confirmed", "Confirmed", confirmed], ["dismissed", "Not regular", dismissed]] as const).map(([k, label, list]) =>
                   list.length ? (
                     <section key={k}>
                       <button className="flex w-full items-center justify-between py-2 text-left text-[13.5px] font-medium" onClick={() => setShowDone((v) => (v === k ? null : k))} aria-expanded={showDone === k}>
@@ -202,63 +211,14 @@ function Suggestion({ s, raw, onStatus, onSave }: { s: Subscription; raw?: strin
       </div>
 
       {editing ? (
-        <EditForm s={s} initialName={label.unknown ? "" : label.name} onCancel={() => setEditing(false)} onSave={(p, name) => { onSave(p, name); setEditing(false); }} />
+        <EditPayment s={s} initialName={label.unknown ? "" : label.name} submitLabel="Save and confirm" onCancel={() => setEditing(false)} onSave={(p, name) => { onSave(p, name); setEditing(false); }} />
       ) : (
         <div className="mt-2.5 grid grid-cols-3 gap-2 sm:flex sm:justify-end">
-          <button className="btn btn-primary px-2" onClick={() => onStatus(s, "confirmed", label.name)} aria-label={`Confirm ${label.name} as a recurring payment`}>Confirm</button>
+          <button className="btn btn-primary px-2" onClick={() => onStatus(s, "confirmed", label.name)} aria-label={`Confirm ${label.name} as a regular payment`}>Yes, regular</button>
           <button className="btn btn-ghost px-2" onClick={() => setEditing(true)} aria-label={`Edit details for ${label.name}`}>Edit details</button>
-          <button className="btn btn-ghost px-2" onClick={() => onStatus(s, "dismissed", label.name)} aria-label={`${label.name} is not recurring`}>Not recurring</button>
+          <button className="btn btn-ghost px-2" onClick={() => onStatus(s, "dismissed", label.name)} aria-label={`${label.name} is not a regular payment`}>Not regular</button>
         </div>
       )}
     </li>
-  );
-}
-
-function EditForm({ s, initialName, onCancel, onSave }: { s: Subscription; initialName: string; onCancel(): void; onSave(p: Partial<Subscription>, name: string): void }) {
-  const [name, setName] = useState(initialName);
-  const [group, setGroup] = useState<Group>(groupOf(s));
-  const [amount, setAmount] = useState(String(s.amount));
-  const [frequency, setFrequency] = useState<Frequency>(s.frequency);
-  const [err, setErr] = useState<string>();
-  return (
-    <form
-      className="mt-3 grid gap-3 rounded-[6px] border rule bg-surface p-3 sm:grid-cols-2"
-      onSubmit={(e) => {
-        e.preventDefault();
-        const amt = Number(amount.replace(/[,\s]/g, ""));
-        if (!name.trim()) return setErr("Give this payment a name you'll recognise.");
-        if (!Number.isFinite(amt) || amt <= 0) return setErr("Enter an amount above zero.");
-        onSave(editPatch(s, { name, group, amount: amt, frequency }), name.trim());
-      }}
-    >
-      <label className="text-[12.5px] text-muted sm:col-span-2">
-        Name
-        <input className="input mt-1" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} placeholder="e.g. Netflix, House rent" autoFocus />
-      </label>
-      <label className="text-[12.5px] text-muted">
-        Category
-        <select className="input mt-1" value={group} onChange={(e) => setGroup(e.target.value as Group)}>
-          {(Object.keys(GROUP_LABEL) as Group[]).map((g) => <option key={g} value={g}>{GROUP_LABEL[g]}</option>)}
-        </select>
-      </label>
-      <label className="text-[12.5px] text-muted">
-        How often
-        <select className="input mt-1" value={frequency} onChange={(e) => setFrequency(e.target.value as Frequency)}>
-          <option value="weekly">Every week</option>
-          <option value="monthly">Every month</option>
-          <option value="quarterly">Every three months</option>
-          <option value="yearly">Every year</option>
-        </select>
-      </label>
-      <label className="text-[12.5px] text-muted sm:col-span-2">
-        Usual amount ({s.currency})
-        <input className="input num mt-1" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
-      </label>
-      {err && <p className="text-[12.5px] text-alert sm:col-span-2" role="alert">{err}</p>}
-      <div className="grid grid-cols-2 gap-2 sm:col-span-2 sm:flex sm:justify-end">
-        <button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button>
-        <button className="btn btn-primary">Save and confirm</button>
-      </div>
-    </form>
   );
 }

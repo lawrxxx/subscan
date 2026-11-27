@@ -49,10 +49,10 @@ export function ReviewTable({ rows, onChange }: { rows: ExtractedRow[]; onChange
           {(
             [
               ["all", "All"],
-              ["review", "Needs review"],
+              ["review", "Unclear"],
               ["out", "Money out"],
               ["in", "Money in"],
-              ["dupes", "Already imported"],
+              ["dupes", "Already added"],
             ] as [Filter, string][]
           ).map(([k, l]) => (
             <button key={k} role="tab" aria-selected={filter === k} onClick={() => { setFilter(k); setLimit(PAGE); }} className={k === "review" && counts.review ? "text-amber" : ""}>
@@ -61,14 +61,14 @@ export function ReviewTable({ rows, onChange }: { rows: ExtractedRow[]; onChange
           ))}
         </div>
         <div className="flex flex-wrap gap-2 text-[12px]">
-          <button className="btn btn-quiet btn-sm" onClick={() => setAll((r) => visible.includes(r), true)}>Include shown</button>
-          <button className="btn btn-quiet btn-sm" onClick={() => setAll((r) => visible.includes(r), false)}>Exclude shown</button>
+          <button className="btn btn-quiet btn-sm" onClick={() => setAll((r) => visible.includes(r), true)}>Tick all shown</button>
+          <button className="btn btn-quiet btn-sm" onClick={() => setAll((r) => visible.includes(r), false)}>Untick all shown</button>
         </div>
       </div>
 
       {filter === "review" && counts.review > 0 && (
         <p className="mt-3 rounded-[6px] bg-amber-wash px-3 py-2 text-[13px] text-ink-2">
-          These rows have something we couldn&rsquo;t read with confidence. Fix them, or tick them to include as shown. Unticked rows are not saved.
+          We couldn&rsquo;t read these rows clearly. Fix them, or tick them to keep them as they are. Unticked rows aren&rsquo;t saved.
         </p>
       )}
 
@@ -81,7 +81,7 @@ export function ReviewTable({ rows, onChange }: { rows: ExtractedRow[]; onChange
               <input aria-label="Description" className="input h-8 px-2 text-[13px]" value={r.description} onChange={(e) => update(r.id, { description: e.target.value })} />
               {(r.issues.length > 0 || r.duplicateOf) && (
                 <div className="mt-1 flex flex-wrap gap-1">
-                  {r.duplicateOf && <span className="tag text-muted">Already imported — skipped</span>}
+                  {r.duplicateOf && <span className="tag text-muted">Already added, skipped</span>}
                   {r.issues.map((i) => <span key={i} className="tag border-amber/40 bg-amber-wash text-amber">{i}</span>)}
                 </div>
               )}

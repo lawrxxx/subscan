@@ -37,7 +37,7 @@ export default function WalletPage() {
   }, []);
 
   const agentId = state.settings.agentId ?? status?.erc8004AgentId ?? undefined;
-  const history = state.payments.filter((p) => p.status !== "prepared").slice(0, 6);
+  const history = state.payments.filter((p) => p.status !== "prepared");
   const fx = state.payments.filter((p) => p.status === "confirmed" && p.sourceToken !== p.destinationToken);
 
   async function register() {
@@ -60,6 +60,7 @@ export default function WalletPage() {
 
   return (
     <div>
+      <div className="px-4 pt-5 text-[13px] sm:px-6 lg:px-8"><Link href="/settings" className="text-muted hover:text-ink">← Settings</Link></div>
       <PageBar
         title="Wallet"
         sub="Balances are read live from Celo mainnet. subscan never holds your keys or funds."
@@ -110,7 +111,6 @@ export default function WalletPage() {
           <section className="panel">
             <div className="panel-head">
               <h2 className="panel-title">Payment history</h2>
-              <Link href="/activity?tab=payments" className="link text-[13px]">All payments</Link>
             </div>
             {!history.length ? (
               <EmptyPanel icon="activity" title="No on-chain payments yet">Payments you approve from a bill appear here with their Celo transaction hashes.</EmptyPanel>
@@ -124,7 +124,7 @@ export default function WalletPage() {
                       return (
                         <tr key={p.id}>
                           <td className="num whitespace-nowrap text-muted">{date(p.createdAt.slice(0, 10))}</td>
-                          <td><Link href={`/activity/${p.id}`} className="font-medium hover:underline">{p.merchant}</Link></td>
+                          <td><Link href={`/wallet/${p.id}`} className="font-medium hover:underline">{p.merchant}</Link></td>
                           <td className="r num whitespace-nowrap">{p.destinationAmount} {TOKENS[p.destinationToken].display}</td>
                           <td className="hidden md:table-cell">{settle ? <HashLink hash={settle} n={4} /> : <span className="text-[12px] text-faint">—</span>}</td>
                           <td><PayStatus status={p.status} /></td>

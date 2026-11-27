@@ -54,3 +54,15 @@ export function payeeName(merchant: string) {
   if (!/^[a-z0-9-]+$/.test(merchant)) return merchant;
   return merchant.split("-").filter(Boolean).map((w) => (w.length <= 3 && /\d/.test(w) ? w : w[0].toUpperCase() + w.slice(1))).join(" ");
 }
+
+/** A readable name for a statement line. Never returns a bare reference number. */
+export function txLabel(t: { merchant: string; description: string }) {
+  const name = payeeName(t.merchant);
+  const letters = name.replace(/[^A-Za-z]/g, "").length;
+  const digits = name.replace(/\D/g, "").length;
+  const looksLikeRef = letters < 3 || digits >= 4 || /[a-z]*\d+[a-z]+\d/i.test(name);
+  if (!looksLikeRef) return name;
+  if (/\b(nip|trf|transfer|tfr)\b/i.test(t.description)) return "Bank transfer";
+  if (/\b(pos|card|web)\b/i.test(t.description)) return "Card payment";
+  return "Unknown payee";
+}

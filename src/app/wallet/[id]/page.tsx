@@ -65,11 +65,11 @@ export default function Receipt() {
   }, [hashes]);
 
   if (!ready) return null;
-  if (!p) return <Missing what="receipt" back="/activity" backLabel="Back to activity" />;
+  if (!p) return <Missing what="receipt" back="/spending" backLabel="Back to activity" />;
   const created = new Date(p.createdAt);
   return (
     <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-      <div className="mb-5 text-[13px]"><Link href="/activity?tab=payments" className="text-muted link">Activity</Link> <span className="text-faint">/</span> Receipt</div>
+      <div className="mb-5 text-[13px]"><Link href="/settings" className="text-muted link">Settings</Link> <span className="text-faint">/</span> <Link href="/wallet" className="text-muted link">Wallet</Link> <span className="text-faint">/</span> Receipt</div>
       <article className="panel mx-auto max-w-2xl">
         <header className="flex items-start justify-between border-b rule px-6 py-5 sm:px-8">
           <div>
