@@ -20,7 +20,7 @@ async function pdfLines(path: string): Promise<TextLine[]> {
 
 test("PDF with debit/credit columns: every row read, directions from columns", async () => {
   const { rows, layout } = parseStatementLines(await pdfLines("tests/fixtures/statement-columns.pdf"), "NGN");
-  assert.equal(layout, "column layout");
+  assert.equal(layout, "separate money in and money out columns");
   assert.equal(rows.length, 54);
   assert.equal(rows.filter((r) => r.issues.length).length, 0, JSON.stringify(rows.filter((r) => r.issues.length).slice(0, 3)));
   assert.equal(rows.filter((r) => r.direction === "credit").length, 6);
@@ -75,10 +75,59 @@ test("CSV: credits kept, unsigned amounts flagged, mapping requested when unclea
   assert.deepEqual(r.rows.map((x) => x.direction), ["debit", "credit"]);
   const unsigned = extractCsv("Date,Description,Amount\n2026-01-05,NETFLIX,5000", "NGN");
   assert.equal(unsigned.rows[0].include, false);
-  assert.match(unsigned.rows[0].issues[0], /Money in or out/);
+  assert.match(unsigned.rows[0].issues[0], /Not sure if money came in or went out/);
   const odd = extractCsv("When,What,How much\n2026-01-05,NETFLIX,5000", "NGN");
   assert.equal(odd.needsMapping, true);
   const mapped = extractCsv("When,What,How much\n2026-01-05,NETFLIX,-5000", "NGN", { date: "When", description: "What", amount: "How much" });
   assert.equal(mapped.rows[0].direction, "debit");
   assert.equal(mapped.rows[0].include, true);
+});
+
+// --- Representative statements (generated PDFs) -------------------------------
+import { ISSUE } from "../src/lib/import/types.ts";
+import { flagInFileRepeats } from "../src/lib/import/normalise.ts";
+
+const credit = (rows: { description: string; direction: string }[], start: string) => rows.find((r) => r.description.startsWith(start))!.direction;
+
+test("Debit(₦)/Credit(₦) statement: inward transfers, own-account transfers, reversals and card payments", async () => {
+  const { rows, layout } = parseStatementLines(await pdfLines("tests/fixtures/statement-debit-credit.pdf"), "NGN");
+  assert.equal(layout, "separate money in and money out columns");
+  assert.equal(rows.length, 18);
+  assert.equal(rows.filter((r) => r.issues.length).length, 0);
+  assert.equal(credit(rows, "NIP TRF FROM ADA OBI"), "credit");
+  assert.equal(credit(rows, "INWARD TRANSFER FROM JOHN DOE"), "credit");
+  assert.equal(credit(rows, "TRANSFER FROM OWN SAVINGS"), "credit");
+  assert.equal(credit(rows, "TRANSFER TO OWN SAVINGS"), "debit");
+  assert.equal(credit(rows, "REVERSAL ATM"), "credit");
+  assert.equal(credit(rows, "WEB PAYMENT NETFLIX"), "debit");
+  assert.equal(credit(rows, "POS PURCHASE SHOPRITE"), "debit");
+  // Totals reconcile with the balance column: opening 100,000 → closing.
+  const net = rows.reduce((x, r) => x + (r.direction === "credit" ? r.amount : -r.amount), 0);
+  assert.equal(100000 + net, rows[rows.length - 1].balance);
+  // The café line printed twice: first kept, copy needs a decision.
+  const flagged = flagInFileRepeats(rows).filter((r) => r.issues.includes(ISSUE.repeat));
+  assert.equal(flagged.length, 1);
+  assert.match(flagged[0].description, /CAFE NEO/);
+});
+
+test("single signed amount column (−₦ out, ₦ in): money in is not mistaken for money out", async () => {
+  const { rows, layout } = parseStatementLines(await pdfLines("tests/fixtures/statement-signed.pdf"), "NGN");
+  assert.equal(layout, "single amount column");
+  assert.equal(rows.length, 18);
+  assert.equal(rows.filter((r) => r.issues.length).length, 0);
+  assert.equal(rows.filter((r) => r.direction === "credit").length, 5);
+  assert.equal(credit(rows, "SALARY CREDIT"), "credit");
+  assert.equal(credit(rows, "NIP TRF FROM ADA OBI"), "credit");
+  const net = rows.reduce((x, r) => x + (r.direction === "credit" ? r.amount : -r.amount), 0);
+  assert.equal(net, 799200);
+});
+
+test("messy statement with no columns or balance: every row kept, all flagged, nothing assumed", async () => {
+  const { rows } = parseStatementLines(await pdfLines("tests/fixtures/statement-messy.pdf"), "NGN");
+  assert.equal(rows.length, 8);
+  assert.ok(rows.every((r) => r.issues.includes(ISSUE.direction) && !r.include && !r.directionFrom));
+  const bad = rows.find((r) => r.issues.includes(ISSUE.date))!;
+  assert.equal(bad.rawDate, "3?-Oct-2026");
+  assert.match(bad.description, /^TRANSFER TO OWN SAVINGS/);
+  assert.equal(rows.find((r) => r.description.startsWith("NIP TRF FROM"))!.hint, "credit");
 });

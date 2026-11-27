@@ -2,7 +2,8 @@
 // debit/credit, type, currency) and lets the user override the mapping.
 import Papa from "papaparse";
 import { ALIASES, detectDateFormat, findColumn, parseAmount, parseDate } from "../detection/csv.ts";
-import type { ColumnMapping, ExtractResult, ExtractedRow, StatementParser } from "./types.ts";
+import { directionHint } from "./hints.ts";
+import { ISSUE, type ColumnMapping, type ExtractResult, type ExtractedRow, type StatementParser } from "./types.ts";
 
 export function detectMapping(headers: string[]): ColumnMapping {
   return {
@@ -41,33 +42,37 @@ export function extractCsv(text: string, homeCurrency: string, override?: Column
     const issues: string[] = [];
     const rawDate = r[mapping.date!] ?? "";
     const date = parseDate(rawDate, fmt) ?? "";
-    if (!date) issues.push(`Unreadable date “${rawDate}”`);
+    if (!date) issues.push(ISSUE.date);
     const description = (r[mapping.description!] ?? "").trim();
-    if (!description) issues.push("No description");
+    if (!description) issues.push(ISSUE.description);
 
     let amount = 0;
     let direction: ExtractedRow["direction"] = "debit";
+    let from: ExtractedRow["directionFrom"];
     let currency: string | undefined;
     const debit = mapping.debit ? parseAmount(r[mapping.debit]) : null;
     const credit = mapping.credit ? parseAmount(r[mapping.credit]) : null;
     if (debit && Math.abs(debit.value) > 0) {
       amount = Math.abs(debit.value);
       currency = debit.currency;
+      from = "columns";
     } else if (credit && Math.abs(credit.value) > 0) {
       amount = Math.abs(credit.value);
       direction = "credit";
       currency = credit.currency;
+      from = "columns";
     } else if (mapping.amount) {
       const a = parseAmount(r[mapping.amount]);
       if (a) {
         amount = Math.abs(a.value);
         currency = a.currency;
         const typ = mapping.type ? (r[mapping.type] ?? "").toLowerCase().trim() : "";
-        if (typ) direction = /^(c|cr|credit|deposit|in)/.test(typ) ? "credit" : "debit";
-        else if (signed) direction = a.value < 0 ? "debit" : "credit";
+        const raw = String(r[mapping.amount] ?? "");
+        if (typ && /^(c|cr|credit|deposit|in|d|dr|debit|withdrawal|out)/.test(typ)) [direction, from] = [/^(c|cr|credit|deposit|in)/.test(typ) ? "credit" : "debit", "type column"];
+        else if (signed || /^[^\d]*\+/.test(raw.trim())) [direction, from] = [a.value < 0 ? "debit" : "credit", "sign"];
         else {
           // Unsigned amounts with no type column: we can't know the direction.
-          issues.push("Money in or out? Assumed money out");
+          issues.push(ISSUE.direction);
           assumed++;
         }
       }
@@ -75,12 +80,12 @@ export function extractCsv(text: string, homeCurrency: string, override?: Column
     if (!amount) {
       // Blank lines, opening balances etc. are not transactions — skip quietly.
       if (!date || !description) return;
-      issues.push("No amount");
+      issues.push(ISSUE.amount);
     }
     const ccy = (mapping.currency ? r[mapping.currency]?.trim().toUpperCase() : "") || currency || homeCurrency;
-    rows.push({ id: `r${i}`, date, description, amount, direction, currency: /^[A-Z]{3}$/.test(ccy) ? ccy : homeCurrency, issues, include: issues.length === 0 });
+    rows.push({ id: `r${i}`, date, description, amount, direction, directionFrom: from, hint: issues.includes(ISSUE.direction) ? directionHint(description) : undefined, rawDate: date ? undefined : rawDate, currency: /^[A-Z]{3}$/.test(ccy) ? ccy : homeCurrency, issues, include: issues.length === 0 });
   });
-  if (assumed) warnings.push(`${assumed} rows don’t say whether money went in or out. They’re marked as money out and left unticked until you confirm.`);
+  if (assumed) warnings.push(`${assumed} transactions don’t say whether money came in or went out.`);
   if (!rows.length) warnings.push("No transactions found in this file.");
   return { format: "CSV", rows, warnings, headers, mapping };
 }

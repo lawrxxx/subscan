@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Wordmark } from "@/components/shell";
-import { ReviewTable, reviewTotals } from "@/components/review-table";
+import { ImportResults, Organising } from "@/components/import-results";
 import { Icon } from "@/components/ui";
 import { useStore } from "@/lib/db/store";
 import { extractStatement } from "@/lib/import";
@@ -14,7 +14,7 @@ import type { ColumnMapping, ExtractResult, ExtractedRow } from "@/lib/import/ty
 
 type Step =
   | { kind: "pick" }
-  | { kind: "reading"; file: File }
+  | { kind: "reading"; file: File; phase: number }
   | { kind: "password"; file: File; incorrect: boolean }
   | { kind: "mapping"; file: File; result: ExtractResult }
   | { kind: "review"; file: File; result: ExtractResult; rows: ExtractedRow[] }
@@ -30,7 +30,7 @@ const ROLES: { key: keyof ColumnMapping; label: string; required?: boolean }[] =
   { key: "currency", label: "Currency" },
 ];
 
-const STEPS = ["Add statement", "Check transactions", "Check payments"];
+const STEPS = ["Add statement", "Organise", "Review results"];
 
 function Progress({ at }: { at: number }) {
   return (
@@ -63,9 +63,13 @@ export default function UploadStatement() {
 
   async function read(file: File, opts: { password?: string; mapping?: ColumnMapping } = {}) {
     setError(undefined);
-    setStep({ kind: "reading", file });
+    const phase = (n: number) => setStep({ kind: "reading", file, phase: n });
+    const tick = () => new Promise((r) => setTimeout(r, 250));
+    phase(0);
     try {
       const result = await extractStatement(file, { homeCurrency: home, ...opts });
+      phase(1);
+      await tick();
       if (result.needsMapping) {
         setMapping(result.mapping ?? {});
         return setStep({ kind: "mapping", file, result });
@@ -76,7 +80,12 @@ export default function UploadStatement() {
       }
       // Mark rows we already have so the same statement can't be imported twice.
       const rows = flagInFileRepeats(markDuplicates(result.rows, state.transactions));
+      phase(2);
+      await tick();
+      phase(3);
+      await tick();
       setStep({ kind: "review", file, result, rows });
+      window.scrollTo(0, 0);
     } catch (e) {
       if (e instanceof PdfPasswordError) return setStep({ kind: "password", file, incorrect: e.incorrect });
       setError(e instanceof Error ? e.message : String(e));
@@ -102,7 +111,7 @@ export default function UploadStatement() {
     router.push(subscriptions.some((x) => !x.manual) ? "/review" : "/?imported=none");
   }
 
-  const at = step.kind === "review" ? 1 : 0;
+  const at = step.kind === "review" ? 2 : step.kind === "reading" ? 1 : 0;
 
   return (
     <div className="min-h-dvh">
@@ -113,12 +122,14 @@ export default function UploadStatement() {
       </header>
 
       {step.kind === "review" ? (
-        <Review step={step} home={home} onChange={(rows) => setStep({ ...step, rows })} onCancel={() => setStep({ kind: "pick" })} onSave={save} />
+        <ImportResults fileName={step.file.name} rows={step.rows} home={home} existing={state.transactions} onChange={(rows) => setStep({ ...step, rows })} onCancel={() => setStep({ kind: "pick" })} onImport={save} />
+      ) : step.kind === "reading" ? (
+        <Organising fileName={step.file.name} phase={step.phase} />
       ) : (
         <div className="mx-auto max-w-[640px] space-y-5 px-4 py-8 sm:px-6 lg:py-12">
           <section>
             <h1 className="title text-[22px] sm:text-[24px]">Add your bank statement</h1>
-            <p className="mt-1 text-[14px] text-ink-2">We&rsquo;ll pull out the transactions, find what repeats, and let you check everything before it&rsquo;s saved.</p>
+            <p className="mt-1 text-[14px] text-ink-2">We&rsquo;ll sort your transactions for you and only ask about anything that&rsquo;s unclear. Nothing is saved until you say so.</p>
 
             <div className="panel mt-5">
               {step.kind === "password" ? (
@@ -167,9 +178,9 @@ export default function UploadStatement() {
                   onDrop={(e) => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) void read(f); }}
                   className={`m-2 flex flex-col items-center rounded-[4px] border border-dashed px-5 py-8 text-center transition-colors ${drag ? "border-accent bg-accent-wash" : "border-line-strong bg-paper-2/40"}`}
                 >
-                  <div className="text-[15px] font-semibold">{step.kind === "reading" ? `Reading ${step.file.name}…` : "Drop your statement here"}</div>
-                  <p className="mt-1 max-w-sm text-[13px] text-muted">{step.kind === "reading" ? "Extracting transactions in your browser…" : "Digital PDF from your bank, or a CSV export. Three to twelve months works best."}</p>
-                  <button className="btn btn-primary mt-4" disabled={step.kind === "reading"} onClick={() => input.current?.click()}>{step.kind === "reading" ? "Reading…" : "Choose a file"}</button>
+                  <div className="text-[15px] font-semibold">Drop your statement here</div>
+                  <p className="mt-1 max-w-sm text-[13px] text-muted">The PDF or CSV you download from your bank. Three months or more works best.</p>
+                  <button className="btn btn-primary mt-4 w-full sm:w-auto" onClick={() => input.current?.click()}>Choose a file</button>
                   <input ref={input} type="file" accept=".pdf,.csv,application/pdf,text/csv" className="hidden" aria-label="Statement file" onChange={(e) => { const f = e.target.files?.[0]; if (f) void read(f); e.target.value = ""; }} />
                   {error && <p role="alert" className="mt-4 max-w-md rounded-[6px] bg-alert-wash px-3 py-2 text-[13px] text-alert">{error}</p>}
                 </div>
@@ -192,37 +203,6 @@ export default function UploadStatement() {
           </p>
         </div>
       )}
-    </div>
-  );
-}
-
-function Review({ step, home, onChange, onCancel, onSave }: { step: Extract<Step, { kind: "review" }>; home: string; onChange(rows: ExtractedRow[]): void; onCancel(): void; onSave(): void }) {
-  const t = reviewTotals(step.rows, home);
-  const pending = step.rows.filter((r) => r.issues.length && !r.include && !r.duplicateOf).length;
-  return (
-    <div className="pb-[calc(96px+env(safe-area-inset-bottom))]">
-      <div className="mx-auto max-w-6xl px-4 pt-5 pb-3 sm:px-6 lg:px-8">
-        <h1 className="title text-[21px] sm:text-[24px]">Check your transactions</h1>
-        <p className="mt-1 text-[13.5px] text-muted">
-          We read <span className="num text-ink">{step.rows.length}</span> rows from {step.file.name} ({step.result.format}). Correct anything that looks wrong. Nothing is saved until you continue.
-        </p>
-        {step.result.warnings.length > 0 && <ul className="mt-3 space-y-1 rounded-[6px] bg-amber-wash px-3 py-2 text-[13px] text-amber">{step.result.warnings.map((w) => <li key={w}>{w}</li>)}</ul>}
-      </div>
-      <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
-        <ReviewTable rows={step.rows} onChange={onChange} />
-      </div>
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t rule bg-surface/95 px-4 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] backdrop-blur sm:px-6 lg:px-8">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
-          <div className="min-w-0 text-[12.5px] leading-tight">
-            <div><span className="num font-medium">{t.count}</span> transactions to save</div>
-            <div className="truncate text-muted">{pending > 0 ? <span className="text-amber">{pending} unclear rows left out</span> : <>out <span className="num">{t.out}</span> · in <span className="num">{t.in}</span></>}</div>
-          </div>
-          <div className="flex shrink-0 gap-2">
-            <button className="btn btn-ghost hidden sm:inline-flex" onClick={onCancel}>Back</button>
-            <button className="btn btn-primary" disabled={!t.count} onClick={onSave}>Save and continue</button>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }

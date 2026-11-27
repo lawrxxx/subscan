@@ -1,6 +1,15 @@
 // Statement import pipeline types. Parsers turn a file into ExtractedRows; the
 // user reviews them; only reviewed rows become Transactions.
 
+/** Plain-language reasons a row needs the user's attention. */
+export const ISSUE = {
+  direction: "Not sure if money came in or went out",
+  amount: "Amount missing",
+  date: "Date couldn't be read",
+  description: "No description",
+  repeat: "Appears twice in this statement",
+} as const;
+
 export interface ExtractedRow {
   id: string;
   date: string; // yyyy-mm-dd ("" when unreadable)
@@ -14,6 +23,14 @@ export interface ExtractedRow {
   include: boolean;
   /** Set when an identical transaction already exists from an earlier import. */
   duplicateOf?: string;
+  /** How the direction was decided (for the detail view); undefined when unsure. */
+  directionFrom?: "columns" | "balance" | "sign" | "marker" | "type column" | "you";
+  /** A guess from the wording, shown to the user only when the direction is unsure. Never applied automatically. */
+  hint?: "debit" | "credit";
+  /** The user chose not to import this row. */
+  skipped?: boolean;
+  /** Original date text when it couldn't be read. */
+  rawDate?: string;
 }
 
 export interface ColumnMapping {

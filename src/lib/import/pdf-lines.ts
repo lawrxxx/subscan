@@ -8,7 +8,8 @@
 //   3. CR/DR markers or signs on the amount.
 // Anything still ambiguous is flagged for the user — never silently confirmed.
 import { parseAmount, parseDate } from "../detection/csv.ts";
-import type { ExtractedRow } from "./types.ts";
+import { directionHint } from "./hints.ts";
+import { ISSUE, type ExtractedRow } from "./types.ts";
 
 export interface TextItem {
   str: string;
@@ -37,15 +38,23 @@ export function linesFromItems(page: number, items: { str: string; transform: nu
 
 const DATE_RE =
   /^(\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}|\d{1,2}[\s-](?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s-,]+\d{2,4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+\d{4})/i;
-const AMOUNT_RE = /^[-(]?\s*(?:[₦$£€]|NGN|USD)?\s?-?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}\)?\s?(?:CR|DR|Cr|Dr)?$/;
+// "5,000.00", "-₦5,000.00", "+20,000.00", "(1,200.00)", "1,200.00 CR", "N5,000", "5,000.00-"
+const AMOUNT_RE = /^[-+(]?\s*(?:[₦$£€]|NGN|USD|N)?\s?[-+]?(?:\d{1,3}(?:,\d{3})+(?:\.\d{2})?|\d+\.\d{2})-?\)?\s?(?:CR|DR|Cr|Dr)?$/;
+const MARKER_RE = /^(CR|DR|C|D)$/i;
+// Something that was meant to be a date but can't be read ("3?-Oct-2026", "31/O9/2026").
+const LOOSE_DATE_RE = /^[\d?]{1,2}\S?[-/. ](?:[a-z]{3,9}|[\dOo]{1,2})[-/. ][\dOo]{2,4}$/i;
 const SKIP_RE = /(opening|closing|brought forward|carried forward|b\/f|c\/f|balance (?:as at|forward)|^total|subtotal|statement period)/i;
 
 const HEADER_WORDS = {
-  debit: /^(debit|debits|withdrawals?|money out|paid out|dr|debit amount|outflow)$/i,
-  credit: /^(credit|credits|deposits?|lodgements?|money in|paid in|cr|credit amount|inflow)$/i,
-  balance: /^(balance|running balance|closing balance|bal)$/i,
-  amount: /^(amount|transaction amount)$/i,
+  debit: /^(debits?|withdrawals?|money out|paid out|dr|debit amount|withdrawal amount|outflows?|out)$/i,
+  credit: /^(credits?|deposits?|lodgements?|money in|paid in|cr|credit amount|deposit amount|inflows?|in)$/i,
+  balance: /^(balance|running balance|closing balance|available balance|ledger balance|bal)$/i,
+  amount: /^(amount|transaction amount|amt)$/i,
 };
+/** "Debit (₦)", "CREDIT(NGN)", "Balance NGN" → bare heading word. */
+function headingWord(str: string) {
+  return str.replace(/\s*\((?:₦|ngn|usd|\$|n)\)\s*$/i, "").replace(/\s+(?:₦|ngn|usd)$/i, "").trim();
+}
 
 type Col = "debit" | "credit" | "balance" | "amount";
 
@@ -60,7 +69,7 @@ function stripDates(str: string) {
 }
 
 function isHeaderLine(cs: TextItem[]) {
-  return cs.some((c) => Object.values(HEADER_WORDS).some((re) => re.test(c.str)));
+  return cs.filter((c) => Object.values(HEADER_WORDS).some((re) => re.test(headingWord(c.str)))).length >= 2;
 }
 
 function center(i: TextItem) {
@@ -118,9 +127,9 @@ function findHeader(lines: TextLine[]): Partial<Record<Col, number>> | null {
   for (const line of lines) {
     const cols: Partial<Record<Col, number>> = {};
     for (const c of cells(line)) {
-      for (const k of Object.keys(HEADER_WORDS) as Col[]) if (HEADER_WORDS[k].test(c.str)) cols[k] = center(c);
+      for (const k of Object.keys(HEADER_WORDS) as Col[]) if (HEADER_WORDS[k].test(headingWord(c.str))) cols[k] = center(c);
     }
-    if ((cols.debit !== undefined && cols.credit !== undefined) || (cols.amount !== undefined && cols.balance !== undefined)) return cols;
+    if ((cols.debit !== undefined && cols.credit !== undefined) || (cols.amount !== undefined && (cols.balance !== undefined || /date/i.test(line.items.map((i) => i.str).join(" "))))) return cols;
   }
   return null;
 }
@@ -152,12 +161,29 @@ function detectFormat(lines: TextLine[]): "dmy" | "mdy" | "iso" | "text" {
   return mdy && !dmy ? "mdy" : "dmy";
 }
 
+type Sign = -1 | 0 | 1;
+
+/** Sign carried by the amount text itself: -1 minus/brackets/DR, +1 plus/CR, 0 none. */
+function signOf(str: string): Sign {
+  if (/^\(.*\)$/.test(str) || /^[^\d]*-/.test(str) || /-$/.test(str.trim()) || /\bDR\b/i.test(str)) return -1;
+  if (/^[^\d]*\+/.test(str) || /\bCR\b/i.test(str)) return 1;
+  return 0;
+}
+
+interface Draft {
+  row: ExtractedRow;
+  sign: Sign; // explicit sign on a single amount column (0 = none)
+  balance?: number;
+}
+
 export function parseStatementLines(lines: TextLine[], homeCurrency: string): { rows: ExtractedRow[]; layout: string; warnings: string[] } {
   const header = findHeader(lines);
   const fmt = detectFormat(lines);
   const allText = lines.map((l) => l.items.map((i) => i.str).join(" ")).join("\n");
   const currency = /\bUSD\b|US\$/.test(allText) && !/\bNGN\b|₦/.test(allText) ? "USD" : homeCurrency;
-  const rows: ExtractedRow[] = [];
+  const twoColumns = !!header && header.debit !== undefined && header.credit !== undefined;
+  const balanceRightmost = !!header && header.balance !== undefined && Object.values(header).every((x) => x! <= header.balance!);
+  const drafts: Draft[] = [];
   let prevBalance: number | undefined;
   let current: ExtractedRow | null = null;
   // Text-only lines seen since the last row. Wrapped narrations can sit above
@@ -170,8 +196,10 @@ export function parseStatementLines(lines: TextLine[], homeCurrency: string): { 
     const cs = cells(line);
     if (!cs.length) continue;
     const text = cs.map((c) => c.str).join(" ");
-    const dateMatch = text.match(DATE_RE);
     const amountCells = cs.filter((c) => AMOUNT_RE.test(c.str));
+    const firstWord = cs[0].str.split(/\s+/)[0];
+    const looseDate = !DATE_RE.test(text) && amountCells.length && LOOSE_DATE_RE.test(firstWord) ? firstWord : null;
+    const dateMatch: RegExpMatchArray | [string, string] | null = text.match(DATE_RE) ?? (looseDate ? [looseDate, looseDate] : null);
 
     if (!dateMatch || !amountCells.length) {
       if (header && !amountCells.length && !DATE_RE.test(text) && text.length < 120 && !SKIP_RE.test(text) && !isHeaderLine(cs)) pending.push(text);
@@ -186,11 +214,12 @@ export function parseStatementLines(lines: TextLine[], homeCurrency: string): { 
     }
 
     const date = parseDate(dateMatch[1], fmt) ?? "";
-    // Description: cells that are not dates or amounts (value-date column dropped).
-    // Description: non-amount cells with leading transaction/value dates removed.
+    const markerCell = cs.find((c) => MARKER_RE.test(c.str) && !AMOUNT_RE.test(c.str));
+    const marker: Sign = markerCell ? (/^c/i.test(markerCell.str) ? 1 : -1) : 0;
+    // Description: non-amount, non-marker cells with leading transaction/value dates removed.
     let description = cs
-      .filter((c) => !AMOUNT_RE.test(c.str))
-      .map((c) => stripDates(c.str))
+      .filter((c) => !AMOUNT_RE.test(c.str) && c !== markerCell)
+      .map((c) => stripDates(looseDate && c === cs[0] ? c.str.slice(looseDate.length) : c.str))
       .filter(Boolean)
       .join(" ");
     if (pending.length) {
@@ -199,24 +228,29 @@ export function parseStatementLines(lines: TextLine[], homeCurrency: string): { 
       pending = [];
     }
 
-    const issues: string[] = [];
     let amount = 0;
     let direction: ExtractedRow["direction"] = "debit";
+    let from: ExtractedRow["directionFrom"];
     let balance: number | undefined;
-    let decided = false;
+    let sign: Sign = 0;
 
     if (header) {
-      for (const c of amountCells) {
-        const col = nearest(center(c), header);
+      const amts = [...amountCells].sort((a, b) => a.x - b.x);
+      // With a balance column on the right, the rightmost amount on a row is the balance:
+      // more reliable than estimated positions when a PDF merges cells.
+      if (balanceRightmost && amts.length >= 2) balance = parseAmount(amts.pop()!.str)?.value;
+      const cols = { ...header };
+      if (balanceRightmost && balance !== undefined) delete cols.balance;
+      for (const c of amts) {
+        const col = nearest(center(c), cols);
         const v = parseAmount(c.str)?.value;
         if (v === undefined) continue;
         if (col === "balance") balance = v;
-        else if (col === "debit" && Math.abs(v) > 0) [amount, direction, decided] = [Math.abs(v), "debit", true];
-        else if (col === "credit" && Math.abs(v) > 0) [amount, direction, decided] = [Math.abs(v), "credit", true];
+        else if (col === "debit" && Math.abs(v) > 0) [amount, direction, from] = [Math.abs(v), "debit", "columns"];
+        else if (col === "credit" && Math.abs(v) > 0) [amount, direction, from] = [Math.abs(v), "credit", "columns"];
         else if (col === "amount") {
           amount = Math.abs(v);
-          if (v < 0 || /DR/i.test(c.str)) [direction, decided] = ["debit", true];
-          else if (/CR/i.test(c.str)) [direction, decided] = ["credit", true];
+          sign = signOf(c.str);
         }
       }
     } else {
@@ -224,31 +258,45 @@ export function parseStatementLines(lines: TextLine[], homeCurrency: string): { 
       if (vals.length >= 2) balance = vals[vals.length - 1].v;
       const main = vals.length >= 2 ? vals[vals.length - 2] : vals[0];
       amount = Math.abs(main.v);
-      if (/DR/i.test(main.c.str) || main.v < 0) [direction, decided] = ["debit", true];
-      else if (/CR/i.test(main.c.str)) [direction, decided] = ["credit", true];
+      sign = signOf(main.c.str);
     }
-    // Running balance is the most reliable signal when present.
-    if (!decided && balance !== undefined && prevBalance !== undefined && amount) {
-      if (Math.abs(prevBalance - amount - balance) < 0.011) [direction, decided] = ["debit", true];
-      else if (Math.abs(prevBalance + amount - balance) < 0.011) [direction, decided] = ["credit", true];
+    if (!from && marker) [direction, from] = [marker > 0 ? "credit" : "debit", "marker"];
+    if (!from && sign) [direction, from] = [sign > 0 ? "credit" : "debit", "sign"];
+
+    // The running balance is arithmetic, not layout: when it clearly says one way, it wins.
+    if (balance !== undefined && prevBalance !== undefined && amount) {
+      const out = Math.abs(prevBalance - amount - balance) < 0.011;
+      const inn = Math.abs(prevBalance + amount - balance) < 0.011;
+      // Keep the column/sign source when it agrees; credit the balance only when it decides or corrects.
+      if (out !== inn && (!from || direction !== (out ? "debit" : "credit"))) [direction, from] = [out ? "debit" : "credit", "balance"];
     }
     if (balance !== undefined) prevBalance = balance;
-    if (!decided && amount) issues.push("Money in or out? Assumed money out");
-    if (!date) issues.push(`Unreadable date “${dateMatch[1]}”`);
-    if (!description) issues.push("No description");
-    if (!amount) issues.push("No amount");
 
-    current = { id: `p${n++}`, date, description, amount, direction, currency, balance, issues, include: issues.length === 0 };
-    rows.push(current);
+    current = { id: `p${n++}`, date, description, amount, direction, currency, balance, issues: [], include: true, directionFrom: from, rawDate: date ? undefined : dateMatch[1] };
+    drafts.push({ row: current, sign, balance });
   }
   if (current && pending.length) current.description = `${current.description} ${pending.join(" ")}`.trim();
-  // A description filled from a following line clears its "No description" issue.
-  for (const r of rows) if (r.description && r.issues.includes("No description")) r.issues = r.issues.filter((i) => i !== "No description");
-  for (const r of rows) r.include = r.issues.length === 0;
+
+  // Single signed amount column: if the statement marks money out with a minus sign,
+  // an unmarked positive amount means money in. (Not applied to debit/credit layouts.)
+  if (!twoColumns) {
+    const minus = drafts.filter((d) => d.sign === -1).length;
+    if (minus > 0) for (const d of drafts) if (!d.row.directionFrom && d.sign === 0 && d.row.amount) [d.row.direction, d.row.directionFrom] = ["credit", "sign"];
+  }
+
+  const rows = drafts.map((d) => d.row);
+  for (const r of rows) {
+    if (!r.amount) r.issues.push(ISSUE.amount);
+    else if (!r.directionFrom) {
+      r.issues.push(ISSUE.direction);
+      r.hint = directionHint(r.description);
+    }
+    if (!r.date) r.issues.push(ISSUE.date);
+    if (!r.description) r.issues.push(ISSUE.description);
+    r.include = r.issues.length === 0;
+  }
 
   const warnings: string[] = [];
-  if (!rows.length) warnings.push("No transaction rows were recognised in this PDF.");
-  const flagged = rows.filter((r) => r.issues.length).length;
-  if (flagged) warnings.push(`${flagged} rows need your review before they’re used.`);
-  return { rows, layout: header ? "column layout" : "running-balance layout", warnings };
+  if (!rows.length) warnings.push("No transactions were recognised in this PDF.");
+  return { rows, layout: twoColumns ? "separate money in and money out columns" : header ? "single amount column" : "running balance", warnings };
 }

@@ -49,6 +49,7 @@ export function parseAmount(raw: unknown): { value: number; currency?: string } 
   if (/^\(.*\)$/.test(s)) negative = true;
   if (/^[^\d]*-/.test(s)) negative = true; // "-1200", "₦-1200", "NGN -1200"
   if (/\bDR\b/i.test(s)) negative = true;
+  if (/^[\d.,\s]+-$/.test(s.replace(/[^\d.,\s-]/g, "").trim())) negative = true; // "1,200.00-"
   s = s.replace(/[^\d.,]/g, "");
   if (!s) return null;
   // "1.234,56" (EU) vs "1,234.56"

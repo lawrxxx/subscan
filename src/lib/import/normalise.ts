@@ -1,6 +1,6 @@
 import { merchantKey } from "../detection/merchants.ts";
 import type { Transaction } from "../types.ts";
-import type { ExtractedRow } from "./types.ts";
+import { ISSUE, type ExtractedRow } from "./types.ts";
 
 function squash(s: string) {
   return s.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -21,11 +21,18 @@ export function markDuplicates(rows: ExtractedRow[], existing: Transaction[]): E
   });
 }
 
-/** Flag identical rows inside one file (could be genuine repeats — user decides). */
+/** Identical rows inside one file: keep the first, ask about the rest (could be a genuine repeat or a double read). */
 export function flagInFileRepeats(rows: ExtractedRow[]): ExtractedRow[] {
-  const count = new Map<string, number>();
-  for (const r of rows) if (r.date) count.set(fingerprint(r), (count.get(fingerprint(r)) ?? 0) + 1);
-  return rows.map((r) => (r.date && (count.get(fingerprint(r)) ?? 0) > 1 ? { ...r, issues: [...r.issues, "Appears more than once in this file"] } : r));
+  const seen = new Set<string>();
+  return rows.map((r) => {
+    if (!r.date) return r;
+    const fp = fingerprint(r);
+    if (!seen.has(fp)) {
+      seen.add(fp);
+      return r;
+    }
+    return { ...r, issues: [...r.issues, ISSUE.repeat], include: false };
+  });
 }
 
 export function rowsToTransactions(rows: ExtractedRow[], source: Transaction["source"], importId: string): Transaction[] {
