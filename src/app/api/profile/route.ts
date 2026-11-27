@@ -19,7 +19,7 @@ export async function PATCH(req: Request) {
   if (p.agentRegistrationTx !== undefined) row.agent_registration_tx = p.agentRegistrationTx;
   if (p.onboarded !== undefined) row.onboarded = p.onboarded;
   try {
-    const { data, error } = await a.supabase.from("profiles").upsert(row, { onConflict: "id" }).select().single();
+    const { data, error } = await a.supabase.from("subscan_profiles").upsert(row, { onConflict: "id" }).select().single();
     if (error) throw new Error(error.message);
     return NextResponse.json({ data: profileToSettings(data) });
   } catch (e) {

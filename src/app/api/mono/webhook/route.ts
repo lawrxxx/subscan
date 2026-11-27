@@ -27,12 +27,12 @@ export async function POST(req: Request) {
   const status = body.data?.meta?.data_status?.toLowerCase();
 
   if (body.event === "mono.events.account_connected" && ref && accountId) {
-    await db.from("mono_links").update({ account_id: accountId, status: "connected" }).eq("ref", ref);
+    await db.from("subscan_mono_links").update({ account_id: accountId, status: "connected" }).eq("ref", ref);
   }
   if (body.event === "mono.events.account_updated" && accountId) {
-    const { data: link } = await db.from("mono_links").select("id,user_id,account_id").eq("account_id", accountId).maybeSingle();
+    const { data: link } = await db.from("subscan_mono_links").select("id,user_id,account_id").eq("account_id", accountId).maybeSingle();
     if (link && status && ["available", "partial", "unavailable", "failed"].includes(status)) {
-      await db.from("mono_links").update({ status }).eq("id", link.id);
+      await db.from("subscan_mono_links").update({ status }).eq("id", link.id);
       if (status === "available" || status === "partial") await syncLink(db, link).catch(() => {});
     }
   }

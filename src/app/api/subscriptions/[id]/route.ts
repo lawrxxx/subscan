@@ -23,7 +23,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   if (p.edited !== undefined) row.edited = p.edited;
   if (!Object.keys(row).length) return NextResponse.json({ error: "Nothing to update" }, { status: 422 });
   try {
-    const { data, error } = await a.supabase.from("subscriptions").update(row).eq("user_id", a.user.id).eq("id", decodeURIComponent(id)).select().maybeSingle();
+    const { data, error } = await a.supabase.from("subscan_subscriptions").update(row).eq("user_id", a.user.id).eq("id", decodeURIComponent(id)).select().maybeSingle();
     if (error) throw new Error(error.message);
     if (!data) return NextResponse.json({ error: "Subscription not found" }, { status: 404 });
     return NextResponse.json({ data: rowToSub(data) });

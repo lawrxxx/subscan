@@ -8,7 +8,7 @@ export async function GET() {
   const a = await requireUser();
   if (a instanceof NextResponse) return a;
   try {
-    const { data, error } = await a.supabase.from("agent_events").select("id,question,reply,mode,tools,created_at").eq("user_id", a.user.id).order("created_at", { ascending: false }).limit(30);
+    const { data, error } = await a.supabase.from("subscan_agent_events").select("id,question,reply,mode,tools,created_at").eq("user_id", a.user.id).order("created_at", { ascending: false }).limit(30);
     if (error) throw new Error(error.message);
     return NextResponse.json({ data });
   } catch (e) {

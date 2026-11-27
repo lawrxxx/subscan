@@ -16,7 +16,7 @@ Checks: `npm run typecheck`, `npm test`, `npm run build`.
 
 ## Production setup (Supabase + Vercel)
 
-1. **Supabase** → create a project → SQL editor → run `supabase/migrations/20261127000000_init.sql`.
+1. **Supabase** → create a project → SQL editor → run `supabase/migrations/20261127000000_subscan_init.sql`.
 2. Supabase → Authentication → URL configuration: Site URL = your Vercel URL; add `https://<your-domain>/auth/callback` to Redirect URLs.
 3. **Vercel** → Project → Settings → Environment Variables (Production): `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and optionally `ANTHROPIC_API_KEY`, `MONO_SECRET_KEY`, `MONO_WEBHOOK_SECRET`. Redeploy.
 4. **Mono** (optional) → dashboard → webhook URL `https://<your-domain>/api/mono/webhook`, secret = `MONO_WEBHOOK_SECRET`.

@@ -13,7 +13,7 @@ export async function POST(req: Request) {
   const b = await parseBody(req, ImportIn);
   if (!b.ok) return b.res;
   try {
-    const { data: profile } = await a.supabase.from("profiles").select("home_currency").eq("id", a.user.id).maybeSingle();
+    const { data: profile } = await a.supabase.from("subscan_profiles").select("home_currency").eq("id", a.user.id).maybeSingle();
     const subs = await importTransactions(a.supabase, a.user.id, b.data.transactions, b.data.source, profile?.home_currency ?? "NGN");
     return NextResponse.json({ data: { subscriptions: subs, transactionCount: b.data.transactions.length } });
   } catch (e) {

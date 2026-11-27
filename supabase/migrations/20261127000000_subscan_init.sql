@@ -1,11 +1,13 @@
--- subscan schema. Every table is owned by a Supabase auth user and protected by
+-- subscan schema. All objects are prefixed subscan_ so the app can share a
+-- Supabase project with other apps without touching their tables or triggers.
+-- Every table is owned by a Supabase auth user and protected by
 -- row-level security: a signed-in user can only read and write their own rows.
 -- The service role (server only) is used solely for the Mono webhook.
 
 create extension if not exists pgcrypto;
 
 -- Profiles -------------------------------------------------------------------
-create table if not exists public.profiles (
+create table if not exists public.subscan_profiles (
   id uuid primary key references auth.users (id) on delete cascade,
   display_name text check (char_length(display_name) <= 80),
   home_currency text not null default 'NGN' check (home_currency in ('NGN', 'USD')),
@@ -20,22 +22,25 @@ create table if not exists public.profiles (
   updated_at timestamptz not null default now()
 );
 
-create or replace function public.handle_new_user() returns trigger
+create or replace function public.subscan_handle_new_user() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
-  insert into public.profiles (id, display_name)
+  insert into public.subscan_profiles (id, display_name)
   values (new.id, nullif(new.raw_user_meta_data ->> 'display_name', ''))
   on conflict (id) do nothing;
   return new;
 end;
 $$;
 
-drop trigger if exists on_auth_user_created on auth.users;
-create trigger on_auth_user_created after insert on auth.users
-  for each row execute function public.handle_new_user();
+-- Existing users (when sharing a project with another app) get a profile too.
+insert into public.subscan_profiles (id) select id from auth.users on conflict (id) do nothing;
+
+drop trigger if exists subscan_on_auth_user_created on auth.users;
+create trigger subscan_on_auth_user_created after insert on auth.users
+  for each row execute function public.subscan_handle_new_user();
 
 -- Imported transactions --------------------------------------------------------
-create table if not exists public.transactions (
+create table if not exists public.subscan_transactions (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
   external_id text not null check (char_length(external_id) <= 120),
@@ -48,10 +53,10 @@ create table if not exists public.transactions (
   created_at timestamptz not null default now(),
   unique (user_id, source, external_id)
 );
-create index if not exists transactions_user_date_idx on public.transactions (user_id, date desc);
+create index if not exists subscan_transactions_user_date_idx on public.subscan_transactions (user_id, date desc);
 
 -- Detected subscriptions -------------------------------------------------------
-create table if not exists public.subscriptions (
+create table if not exists public.subscan_subscriptions (
   user_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
   id text not null check (char_length(id) <= 160),
   merchant text not null,
@@ -80,7 +85,7 @@ create table if not exists public.subscriptions (
 );
 
 -- Payments (prepared drafts and on-chain attempts) -----------------------------
-create table if not exists public.payments (
+create table if not exists public.subscan_payments (
   id text primary key check (id ~ '^pay_[a-z0-9]{4,32}$'),
   user_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
   subscription_id text not null,
@@ -100,10 +105,10 @@ create table if not exists public.payments (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-create index if not exists payments_user_created_idx on public.payments (user_id, created_at desc);
+create index if not exists subscan_payments_user_created_idx on public.subscan_payments (user_id, created_at desc);
 
 -- Agent activity ---------------------------------------------------------------
-create table if not exists public.agent_events (
+create table if not exists public.subscan_agent_events (
   id bigint generated always as identity primary key,
   user_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
   question text not null check (char_length(question) <= 2000),
@@ -112,10 +117,10 @@ create table if not exists public.agent_events (
   tools jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default now()
 );
-create index if not exists agent_events_user_idx on public.agent_events (user_id, created_at desc);
+create index if not exists subscan_agent_events_user_idx on public.subscan_agent_events (user_id, created_at desc);
 
 -- Mono account links -----------------------------------------------------------
-create table if not exists public.mono_links (
+create table if not exists public.subscan_mono_links (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
   ref text not null unique,
@@ -127,36 +132,36 @@ create table if not exists public.mono_links (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-create index if not exists mono_links_user_idx on public.mono_links (user_id, created_at desc);
+create index if not exists subscan_mono_links_user_idx on public.subscan_mono_links (user_id, created_at desc);
 
 -- updated_at maintenance -------------------------------------------------------
-create or replace function public.touch_updated_at() returns trigger language plpgsql as $$
+create or replace function public.subscan_touch_updated_at() returns trigger language plpgsql as $$
 begin new.updated_at = now(); return new; end; $$;
 
 do $$ declare t text; begin
-  foreach t in array array['profiles', 'subscriptions', 'payments', 'mono_links'] loop
+  foreach t in array array['subscan_profiles', 'subscan_subscriptions', 'subscan_payments', 'subscan_mono_links'] loop
     execute format('drop trigger if exists touch_%1$s on public.%1$s', t);
-    execute format('create trigger touch_%1$s before update on public.%1$s for each row execute function public.touch_updated_at()', t);
+    execute format('create trigger touch_%1$s before update on public.%1$s for each row execute function public.subscan_touch_updated_at()', t);
   end loop;
 end $$;
 
 -- Row-level security -------------------------------------------------------------
-alter table public.profiles enable row level security;
-alter table public.transactions enable row level security;
-alter table public.subscriptions enable row level security;
-alter table public.payments enable row level security;
-alter table public.agent_events enable row level security;
-alter table public.mono_links enable row level security;
+alter table public.subscan_profiles enable row level security;
+alter table public.subscan_transactions enable row level security;
+alter table public.subscan_subscriptions enable row level security;
+alter table public.subscan_payments enable row level security;
+alter table public.subscan_agent_events enable row level security;
+alter table public.subscan_mono_links enable row level security;
 
-drop policy if exists "own profile read" on public.profiles;
-create policy "own profile read" on public.profiles for select to authenticated using (id = (select auth.uid()));
-drop policy if exists "own profile update" on public.profiles;
-create policy "own profile update" on public.profiles for update to authenticated using (id = (select auth.uid())) with check (id = (select auth.uid()));
-drop policy if exists "own profile insert" on public.profiles;
-create policy "own profile insert" on public.profiles for insert to authenticated with check (id = (select auth.uid()));
+drop policy if exists "own profile read" on public.subscan_profiles;
+create policy "own profile read" on public.subscan_profiles for select to authenticated using (id = (select auth.uid()));
+drop policy if exists "own profile update" on public.subscan_profiles;
+create policy "own profile update" on public.subscan_profiles for update to authenticated using (id = (select auth.uid())) with check (id = (select auth.uid()));
+drop policy if exists "own profile insert" on public.subscan_profiles;
+create policy "own profile insert" on public.subscan_profiles for insert to authenticated with check (id = (select auth.uid()));
 
 do $$ declare t text; begin
-  foreach t in array array['transactions', 'subscriptions', 'payments', 'agent_events'] loop
+  foreach t in array array['subscan_transactions', 'subscan_subscriptions', 'subscan_payments', 'subscan_agent_events'] loop
     execute format('drop policy if exists "own rows" on public.%I', t);
     execute format('create policy "own rows" on public.%I for all to authenticated using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()))', t);
   end loop;
@@ -164,7 +169,7 @@ end $$;
 
 -- Mono links: users may create and read their own; status changes come from the
 -- server (webhook / sync) using the service role.
-drop policy if exists "own links read" on public.mono_links;
-create policy "own links read" on public.mono_links for select to authenticated using (user_id = (select auth.uid()));
-drop policy if exists "own links insert" on public.mono_links;
-create policy "own links insert" on public.mono_links for insert to authenticated with check (user_id = (select auth.uid()));
+drop policy if exists "own links read" on public.subscan_mono_links;
+create policy "own links read" on public.subscan_mono_links for select to authenticated using (user_id = (select auth.uid()));
+drop policy if exists "own links insert" on public.subscan_mono_links;
+create policy "own links insert" on public.subscan_mono_links for insert to authenticated with check (user_id = (select auth.uid()));

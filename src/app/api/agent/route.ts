@@ -42,7 +42,7 @@ export async function POST(req: Request) {
     const hasKey = !!(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
     const reply = hasKey ? await runClaude(history, ctx) : await runLocal(history[history.length - 1].content, ctx);
     if (supabase && user) {
-      await supabase.from("agent_events").insert({
+      await supabase.from("subscan_agent_events").insert({
         user_id: user.id,
         question: history[history.length - 1].content.slice(0, 2000),
         reply: reply.text,

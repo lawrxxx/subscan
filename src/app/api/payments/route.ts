@@ -15,9 +15,9 @@ export async function PUT(req: Request) {
   if (p.status === "confirmed" && p.steps.some((s) => s.status === "confirmed" && !s.hash && s.kind !== "approval"))
     return NextResponse.json({ error: "A confirmed payment needs on-chain transaction hashes" }, { status: 422 });
   try {
-    const { data: existing } = await a.supabase.from("payments").select("status").eq("id", p.id).maybeSingle();
+    const { data: existing } = await a.supabase.from("subscan_payments").select("status").eq("id", p.id).maybeSingle();
     if (existing?.status === "confirmed" && p.status !== "confirmed") return NextResponse.json({ error: "Confirmed payments cannot change" }, { status: 409 });
-    const { data, error } = await a.supabase.from("payments").upsert(paymentToRow(p, a.user.id), { onConflict: "id" }).select().single();
+    const { data, error } = await a.supabase.from("subscan_payments").upsert(paymentToRow(p, a.user.id), { onConflict: "id" }).select().single();
     if (error) throw new Error(error.message);
     return NextResponse.json({ data: rowToPayment(data) });
   } catch (e) {
