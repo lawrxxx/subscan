@@ -69,13 +69,15 @@ export default function Bills() {
         title="Bills"
         sub={live.length ? <>{live.length} recurring payment{live.length === 1 ? "" : "s"} · {c.monthlyHome !== null ? `${money(c.monthlyHome, home)} a month committed` : "mixed currencies"}</> : "Subscriptions, utilities and other regular payments"}
         actions={
-          <>
-            <button className="btn btn-ghost" onClick={() => setAdding(true)}><Icon name="plus" size={16} />Add bill</button>
-            <UploadButton className="btn btn-primary" />
-          </>
+          subs.length > 0 && (
+            <>
+              <button className="btn btn-ghost" onClick={() => setAdding(true)}>Add bill</button>
+              <UploadButton className="btn btn-primary" />
+            </>
+          )
         }
       >
-        <div className="tabs mt-5" role="tablist">
+        {subs.length > 0 && <div className="tabs mt-4" role="tablist">
           {(
             [
               ["all", "All"],
@@ -91,14 +93,14 @@ export default function Bills() {
               <span className={`count ${k === "review" && counts.review ? "!bg-amber-wash !text-amber" : ""}`}>{counts[k]}</span>
             </button>
           ))}
-        </div>
+        </div>}
       </PageBar>
 
       <div className="space-y-4 px-4 sm:px-6 lg:px-8">
         {adding && <AddBill home={home} onCancel={() => setAdding(false)} onAdd={(s) => { addManual(s); setAdding(false); setView("all"); }} />}
 
         <section className="panel">
-          <div className="flex flex-col gap-2 border-b rule px-3 py-2.5 md:flex-row md:items-center">
+          {subs.length > 0 && <div className="flex flex-col gap-2 border-b rule px-3 py-2.5 md:flex-row md:items-center">
             <label className="relative flex-1">
               <Icon name="search" size={15} className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-faint" />
               <input className="input pl-8" placeholder="Search bills" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search bills" />
@@ -118,7 +120,7 @@ export default function Bills() {
                 <option value="name">Sort: name</option>
               </select>
             </div>
-          </div>
+          </div>}
 
           {view === "review" && sure.length > 1 && (
             <div className="flex flex-wrap items-center justify-between gap-2 border-b rule bg-accent-wash/40 px-4 py-2.5 text-[13px]">
@@ -129,11 +131,11 @@ export default function Bills() {
 
           {!subs.length ? (
             state.transactions.length ? (
-              <EmptyPanel icon="bills" title="No recurring payments found in your statement" action={<button className="btn btn-ghost" onClick={() => setAdding(true)}><Icon name="plus" size={16} />Add a bill yourself</button>}>
+              <EmptyPanel icon="bills" title="No recurring payments found in your statement" action={<div className="flex flex-wrap justify-center gap-2"><UploadButton label="Upload more months" /><button className="btn btn-ghost" onClick={() => setAdding(true)}>Add a bill yourself</button></div>}>
                 Bills need at least two charges to be spotted. Upload more months, or add one you know about.
               </EmptyPanel>
             ) : (
-              <EmptyPanel icon="upload" title="No bills yet" action={<UploadButton />}>Upload a bank or card statement to find your subscriptions, utilities and other regular payments.</EmptyPanel>
+              <EmptyPanel icon="upload" title="No bills yet" action={<div className="flex flex-wrap justify-center gap-2"><UploadButton /><button className="btn btn-ghost" onClick={() => setAdding(true)}>Add one yourself</button></div>}>Upload a bank or card statement to find your subscriptions, utilities and other regular payments.</EmptyPanel>
             )
           ) : !list.length ? (
             <EmptyPanel icon="search" title={q ? `Nothing matches “${q}”` : view === "review" ? "Nothing to review" : "Nothing in this view"}>{view === "review" ? "Every detected bill has been confirmed or dismissed." : undefined}</EmptyPanel>
@@ -178,8 +180,8 @@ export default function Bills() {
                       <td className="r hidden whitespace-nowrap sm:table-cell">
                         {s.status === "detected" ? (
                           <span className="inline-flex gap-1.5">
-                            <button className="btn btn-ghost btn-sm" onClick={() => setStatus(s, "confirmed")} aria-label={`Confirm ${s.displayName}`}><Icon name="check" size={14} /><span className="hidden sm:inline">Confirm</span></button>
-                            <button className="btn btn-quiet btn-sm" onClick={() => setStatus(s, "dismissed")} aria-label={`Dismiss ${s.displayName}`}><Icon name="close" size={14} /><span className="hidden sm:inline">Dismiss</span></button>
+                            <button className="btn btn-ghost btn-sm" onClick={() => setStatus(s, "confirmed")} aria-label={`Confirm ${s.displayName}`}>Confirm</button>
+                            <button className="btn btn-quiet btn-sm" onClick={() => setStatus(s, "dismissed")} aria-label={`Dismiss ${s.displayName}`}>Dismiss</button>
                           </span>
                         ) : s.status === "dismissed" ? (
                           <button className="btn btn-quiet btn-sm" onClick={() => setStatus(s, "detected")}>Restore</button>

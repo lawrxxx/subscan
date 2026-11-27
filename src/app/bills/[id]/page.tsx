@@ -57,7 +57,8 @@ export default function BillDetail() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          {s.status === "detected" && <button className="btn btn-ghost" onClick={() => setStatus("confirmed")}><Icon name="check" size={15} />Confirm</button>}
+          {s.status === "detected" && <button className="btn btn-ghost" onClick={() => setStatus("confirmed")}>Confirm</button>}
+          <Link href={`/agent?q=${encodeURIComponent(`Tell me about ${s.displayName}: is it worth keeping and when is it next due?`)}`} className="btn btn-ghost">Ask agent</Link>
           <button className="btn btn-ghost" onClick={() => setEditing((e) => !e)}>{editing ? "Close editor" : "Edit"}</button>
           <Link href={`/pay/${encodeURIComponent(s.id)}`} className="btn btn-primary">Pay this bill</Link>
         </div>

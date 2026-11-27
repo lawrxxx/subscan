@@ -121,12 +121,12 @@ export default function UploadStatement() {
       ) : step.kind === "bills" ? (
         <BillsReview record={step.record} ids={step.ids} onDone={() => router.push("/")} />
       ) : (
-        <div className="mx-auto grid max-w-5xl gap-8 px-4 py-8 sm:px-6 lg:grid-cols-[1.25fr_1fr] lg:py-14">
+        <div className="mx-auto max-w-[640px] space-y-5 px-4 py-8 sm:px-6 lg:py-12">
           <section>
-            <h1 className="title text-[30px] sm:text-[36px]">Upload a statement</h1>
-            <p className="mt-2 max-w-lg text-[14.5px] text-ink-2">subscan reads your bank or card statement, finds subscriptions, utilities and other regular payments, and shows you what&rsquo;s committed and what&rsquo;s due next.</p>
+            <h1 className="title text-[24px]">Upload a statement</h1>
+            <p className="mt-1 text-[14px] text-ink-2">We&rsquo;ll pull out the transactions, find what repeats, and let you check everything before it&rsquo;s saved.</p>
 
-            <div className="panel mt-6">
+            <div className="panel mt-5">
               {step.kind === "password" ? (
                 <form
                   className="px-5 py-6"
@@ -171,14 +171,11 @@ export default function UploadStatement() {
                   onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
                   onDragLeave={() => setDrag(false)}
                   onDrop={(e) => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) void read(f); }}
-                  className={`m-2 flex flex-col items-center rounded-[6px] border border-dashed px-6 py-12 text-center transition-colors ${drag ? "border-accent bg-accent-wash" : "border-line-strong bg-paper-2/40"}`}
+                  className={`m-2 flex flex-col items-center rounded-[4px] border border-dashed px-5 py-8 text-center transition-colors ${drag ? "border-accent bg-accent-wash" : "border-line-strong bg-paper-2/40"}`}
                 >
-                  <span className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-surface text-accent shadow-[0_0_0_1px_var(--color-rule)]">
-                    <Icon name={step.kind === "reading" ? "clock" : "upload"} size={20} />
-                  </span>
-                  <div className="mt-3 text-[16px] font-semibold">{step.kind === "reading" ? `Reading ${step.file.name}…` : "Drop your statement here"}</div>
-                  <p className="mt-1 max-w-sm text-[13px] text-muted">{step.kind === "reading" ? "Extracting transactions in your browser." : "PDF downloaded from your bank, or a CSV export. Three to twelve months works best."}</p>
-                  <button className="btn btn-primary mt-5" disabled={step.kind === "reading"} onClick={() => input.current?.click()}>{step.kind === "reading" ? "Reading…" : "Choose a file"}</button>
+                  <div className="text-[15px] font-semibold">{step.kind === "reading" ? `Reading ${step.file.name}…` : "Drop your statement here"}</div>
+                  <p className="mt-1 max-w-sm text-[13px] text-muted">{step.kind === "reading" ? "Extracting transactions in your browser…" : "Digital PDF from your bank, or a CSV export. Three to twelve months works best."}</p>
+                  <button className="btn btn-primary mt-4" disabled={step.kind === "reading"} onClick={() => input.current?.click()}>{step.kind === "reading" ? "Reading…" : "Choose a file"}</button>
                   <input ref={input} type="file" accept=".pdf,.csv,application/pdf,text/csv" className="hidden" aria-label="Statement file" onChange={(e) => { const f = e.target.files?.[0]; if (f) void read(f); e.target.value = ""; }} />
                   {error && <p role="alert" className="mt-4 max-w-md rounded-[6px] bg-alert-wash px-3 py-2 text-[13px] text-alert">{error}</p>}
                 </div>
@@ -195,32 +192,10 @@ export default function UploadStatement() {
             </div>
           </section>
 
-          <aside className="space-y-4 lg:pt-[88px]">
-            <div className="panel px-5 py-5">
-              <div className="label mb-3">What happens next</div>
-              <ol className="space-y-3 text-[13.5px]">
-                {[
-                  ["Check transactions", "See every row we read. Fix dates, amounts or direction and untick anything wrong."],
-                  ["Review bills", "We list the regular payments we found with how sure we are. Confirm, correct or dismiss each one."],
-                  ["Your overview", "What you're committed to each month, what's due next and where you could save."],
-                ].map(([t, d], i) => (
-                  <li key={t} className="grid grid-cols-[22px_1fr] gap-1">
-                    <span className="num text-faint">{i + 1}.</span>
-                    <span><span className="font-medium">{t}</span><span className="block text-muted">{d}</span></span>
-                  </li>
-                ))}
-              </ol>
-            </div>
-            <div className="panel px-5 py-5 text-[13px] text-ink-2">
-              <div className="label mb-2">Your privacy</div>
-              <ul className="space-y-1.5">
-                <li>The file is read in this browser and never uploaded or kept.</li>
-                <li>Saved transactions stay on this device. Delete them any time in Settings.</li>
-                <li>The agent only sees structured rows, and only when you ask it something.</li>
-                <li>subscan never asks for bank logins or card numbers.</li>
-              </ul>
-            </div>
-          </aside>
+          <p className="flex items-start gap-2 text-[12.5px] text-muted">
+            <Icon name="lock" size={14} className="mt-0.5 shrink-0" />
+            The file is read in this browser and never uploaded or stored. You check every transaction before anything is saved, and you can delete it all from Settings.
+          </p>
         </div>
       )}
     </div>
@@ -251,7 +226,7 @@ function Review({ step, home, onChange, onCancel, onSave }: { step: Extract<Step
           </div>
           <div className="flex gap-2">
             <button className="btn btn-ghost" onClick={onCancel}>Back</button>
-            <button className="btn btn-primary" disabled={!t.count} onClick={onSave}>Save and find bills<Icon name="arrow" size={15} /></button>
+            <button className="btn btn-primary" disabled={!t.count} onClick={onSave}>Save and find bills</button>
           </div>
         </div>
       </div>
@@ -316,7 +291,7 @@ function BillsReview({ record, ids, onDone }: { record: ImportRecord; ids: strin
                 <div className="flex gap-1.5 md:justify-end">
                   {s.status === "detected" ? (
                     <>
-                      <button className="btn btn-ghost btn-sm" onClick={() => set(s.id, s.displayName, "confirmed")}><Icon name="check" size={14} />Confirm</button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => set(s.id, s.displayName, "confirmed")}>Confirm</button>
                       <button className="btn btn-quiet btn-sm" onClick={() => set(s.id, s.displayName, "dismissed")}>Not a bill</button>
                     </>
                   ) : (
@@ -338,7 +313,7 @@ function BillsReview({ record, ids, onDone }: { record: ImportRecord; ids: strin
             <span className="text-[13px] text-muted">{open ? `${open} still to review — you can also do this later from Bills.` : "All reviewed."}</span>
             <div className="flex gap-2">
               {open > 0 && <button className="btn btn-ghost" onClick={() => list.filter((s) => s.status === "detected" && s.confidence >= 0.85).forEach((s) => set(s.id, s.displayName, "confirmed"))}>Confirm high-confidence</button>}
-              <button className="btn btn-primary" onClick={onDone}>See my overview<Icon name="arrow" size={15} /></button>
+              <button className="btn btn-primary" onClick={onDone}>See my overview</button>
             </div>
           </div>
         </div>

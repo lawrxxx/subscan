@@ -2,8 +2,12 @@
 
 /* subscan design system
    Neutral paper ground, white working surfaces, one deep-green accent.
-   Serif (Newsreader) only for page titles; everything operational is IBM Plex
-   Sans with tabular figures. */
+   Type: IBM Plex Sans for all interface text and figures (tabular). Newsreader
+   serif is reserved for the wordmark and the one welcome line a new user sees.
+   Spacing: 4px base (4/8/12/16/20/24/32). Page content max 1200px.
+   Controls: 36px desktop, 44px on touch. Table rows 44px.
+   Colour carries meaning only: green = done/active, amber = needs a decision,
+   red = failed/overdue, blue = in progress. */
 @theme {
   --color-paper: #f5f3ee;
   --color-paper-2: #eeebe3;
@@ -31,8 +35,8 @@
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
 
   --radius-xs: 3px;
-  --radius-sm: 5px;
-  --radius-md: 7px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
 }
 
 @layer base {
@@ -63,11 +67,12 @@
 
 @layer components {
   /* Typography ------------------------------------------------------------ */
+  /* Page titles: sans, compact. */
   .title {
-    font-family: var(--font-serif);
-    font-weight: 450;
-    letter-spacing: -0.015em;
-    line-height: 1.1;
+    font-family: var(--font-sans);
+    font-weight: 600;
+    letter-spacing: -0.012em;
+    line-height: 1.2;
   }
   .display {
     font-family: var(--font-serif);
@@ -382,3 +387,18 @@
     text-underline-offset: 3px;
   }
 }
+
+/* Touch devices: comfortable targets, and 16px inputs so iOS doesn't zoom. */
+@media (pointer: coarse) {
+  .btn { height: 2.75rem; }
+  .btn-sm { height: 2.35rem; padding: 0 0.8rem; }
+  .field, .input { height: 2.75rem; font-size: 16px; }
+  .seg > button, .seg > a { min-height: 2.25rem; }
+}
+
+/* Drawer + dialog motion */
+@keyframes sheet-in { from { transform: translateX(16px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+.anim-sheet { animation: sheet-in 160ms ease-out; }
+.anim-fade { animation: fade-in 120ms ease-out; }
+@media (prefers-reduced-motion: reduce) { .anim-sheet, .anim-fade { animation: none; } }

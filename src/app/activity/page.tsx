@@ -6,7 +6,7 @@ import { Avatar, EmptyPanel, Icon, PageBar, PayStatus, UploadButton } from "@/co
 import { txCategory } from "@/lib/attention";
 import { TOKENS } from "@/lib/celo/config";
 import { useStore } from "@/lib/db/store";
-import { date, money } from "@/lib/format";
+import { date, money, payeeName } from "@/lib/format";
 import type { PaymentStatus, Subscription, Transaction } from "@/lib/types";
 
 type Tab = "transactions" | "payments";
@@ -19,6 +19,7 @@ export default function Activity() {
   const [dir, setDir] = useState<Dir>("all");
   const [category, setCategory] = useState("all");
   const [month, setMonth] = useState("all");
+  const [sort, setSort] = useState<"new" | "old" | "high" | "low">("new");
   const [payStatus, setPayStatus] = useState<"all" | PaymentStatus>("all");
   const [open, setOpen] = useState<Transaction | null>(null);
   const [limit, setLimit] = useState(100);
@@ -34,13 +35,18 @@ export default function Activity() {
   );
   const categories = useMemo(() => [...new Set(rows.map((r) => r.category))].sort(), [rows]);
   const months = useMemo(() => [...new Set(rows.map((r) => r.t.date.slice(0, 7)))], [rows]);
+  const sourceOf = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const i of state.imports ?? []) m.set(i.id, i.fileName);
+    return (t: Transaction) => m.get(t.id.split("-")[0]) ?? (t.source === "manual" ? "Added by you" : t.source.toUpperCase());
+  }, [state.imports]);
   const filtered = rows.filter(
     (r) =>
       (dir === "all" || (r.t.direction ?? "debit") === dir) &&
       (category === "all" || r.category === category) &&
       (month === "all" || r.t.date.startsWith(month)) &&
       (!q || `${r.t.description} ${r.t.merchant} ${r.category}`.toLowerCase().includes(q.toLowerCase())),
-  );
+  ).sort((a, b) => (sort === "old" ? a.t.date.localeCompare(b.t.date) : sort === "high" ? b.t.amount - a.t.amount : sort === "low" ? a.t.amount - b.t.amount : 0));
   const totals = filtered.reduce(
     (a, r) => {
       const k = (r.t.direction ?? "debit") === "credit" ? "in" : "out";
@@ -74,8 +80,8 @@ export default function Activity() {
               <EmptyPanel icon="activity" title="No transactions yet" action={<UploadButton />}>Upload a bank or card statement. Only the transactions you approve during import are saved, in this browser.</EmptyPanel>
             ) : (
               <>
-                <div className="flex flex-col gap-2 border-b rule px-3 py-2.5 lg:flex-row lg:items-center">
-                  <label className="relative flex-1">
+                <div className="flex flex-wrap items-center gap-2 border-b rule px-3 py-2.5">
+                  <label className="relative min-w-[220px] flex-1 basis-full sm:basis-auto">
                     <Icon name="search" size={15} className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-faint" />
                     <input className="input pl-8" placeholder="Search merchant or description" value={q} onChange={(e) => { setQ(e.target.value); setLimit(100); }} aria-label="Search transactions" />
                   </label>
@@ -92,6 +98,12 @@ export default function Activity() {
                     <select className="input w-auto" value={month} onChange={(e) => setMonth(e.target.value)} aria-label="Month">
                       <option value="all">All months</option>
                       {months.map((m) => <option key={m} value={m}>{new Date(`${m}-01T00:00:00Z`).toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" })}</option>)}
+                    </select>
+                    <select className="input w-auto" value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} aria-label="Sort">
+                      <option value="new">Newest first</option>
+                      <option value="old">Oldest first</option>
+                      <option value="high">Largest amount</option>
+                      <option value="low">Smallest amount</option>
                     </select>
                   </div>
                 </div>
@@ -110,7 +122,7 @@ export default function Activity() {
                           <th>Date</th>
                           <th>Description</th>
                           <th className="hidden md:table-cell">Category</th>
-                          <th className="hidden sm:table-cell">Status</th>
+                          <th className="hidden xl:table-cell">Statement</th>
                           <th className="r">Amount</th>
                         </tr>
                       </thead>
@@ -122,9 +134,9 @@ export default function Activity() {
                               <td className="num whitespace-nowrap text-muted">{date(t.date)}</td>
                               <td>
                                 <div className="flex min-w-0 items-center gap-2.5">
-                                  <Avatar name={bill?.displayName ?? t.merchant} size={28} />
+                                  <Avatar name={bill?.displayName ?? payeeName(t.merchant)} size={28} />
                                   <div className="min-w-0">
-                                    <div className="max-w-[46vw] truncate font-medium sm:max-w-[340px]">{bill?.displayName ?? t.merchant}</div>
+                                    <div className="max-w-[46vw] truncate font-medium sm:max-w-[340px]">{bill?.displayName ?? payeeName(t.merchant)}</div>
                                     <div className="max-w-[46vw] truncate text-[12px] text-muted sm:max-w-[340px]">{t.description}</div>
                                   </div>
                                 </div>
@@ -133,8 +145,8 @@ export default function Activity() {
                                 <span className="text-ink-2">{cat}</span>
                                 {bill && <span className="ml-1.5 tag">Bill</span>}
                               </td>
-                              <td className="hidden sm:table-cell"><span className="pill pill-plain">Posted</span></td>
-                              <td className={`r num whitespace-nowrap ${credit ? "text-accent" : ""}`}>{credit ? "+" : "−"}{money(t.amount, t.currency)}</td>
+                              <td className="hidden max-w-[160px] truncate text-[12.5px] text-muted xl:table-cell">{sourceOf(t)}</td>
+                              <td className={`r num whitespace-nowrap ${credit ? "text-accent" : ""}`}>{credit ? "+" : "−"}{money(t.amount, t.currency)}{t.currency !== state.settings.homeCurrency && <div className="text-[11px] text-muted">{t.currency}</div>}</td>
                             </tr>
                           );
                         })}
@@ -217,15 +229,14 @@ export default function Activity() {
         )}
       </div>
 
-      {open && <TxDrawer t={open} bills={bills} onClose={() => setOpen(null)} />}
+      {open && <TxDrawer t={open} bills={bills} source={sourceOf(open)} onClose={() => setOpen(null)} />}
     </div>
   );
 }
 
-function TxDrawer({ t, bills, onClose }: { t: Transaction; bills: Map<string, Subscription>; onClose(): void }) {
+function TxDrawer({ t, bills, source, onClose }: { t: Transaction; bills: Map<string, Subscription>; source: string; onClose(): void }) {
   const { state } = useStore();
   const { category, bill } = txCategory(t, bills);
-  const imp = state.imports?.find((i) => t.id.startsWith(i.id) || (i.from && i.to && t.date >= i.from && t.date <= i.to));
   const credit = (t.direction ?? "debit") === "credit";
   const sameMerchant = state.transactions.filter((x) => x.merchant === t.merchant && x.id !== t.id).length;
   useEffect(() => {
@@ -234,17 +245,17 @@ function TxDrawer({ t, bills, onClose }: { t: Transaction; bills: Map<string, Su
     return () => window.removeEventListener("keydown", k);
   }, [onClose]);
   return (
-    <div className="fixed inset-0 z-40 flex justify-end bg-ink/20" onClick={onClose} role="dialog" aria-modal aria-label="Transaction details">
-      <aside className="flex h-full w-full max-w-md flex-col overflow-y-auto border-l rule bg-surface shadow-xl" onClick={(e) => e.stopPropagation()}>
+    <div className="anim-fade fixed inset-0 z-40 flex justify-end bg-ink/20" onClick={onClose} role="dialog" aria-modal aria-label="Transaction details">
+      <aside className="anim-sheet flex h-full w-full max-w-md flex-col overflow-y-auto border-l rule bg-surface shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b rule px-5 py-3">
           <span className="label">Transaction</span>
           <button className="btn btn-quiet btn-sm" onClick={onClose} aria-label="Close"><Icon name="close" size={16} /></button>
         </div>
         <div className="px-5 py-6">
           <div className="flex items-center gap-3">
-            <Avatar name={bill?.displayName ?? t.merchant} size={40} />
+            <Avatar name={bill?.displayName ?? payeeName(t.merchant)} size={40} />
             <div className="min-w-0">
-              <div className="truncate text-[16px] font-semibold">{bill?.displayName ?? t.merchant}</div>
+              <div className="truncate text-[16px] font-semibold">{bill?.displayName ?? payeeName(t.merchant)}</div>
               <div className="text-[13px] text-muted">{date(t.date, "long")}</div>
             </div>
           </div>
@@ -256,7 +267,7 @@ function TxDrawer({ t, bills, onClose }: { t: Transaction; bills: Map<string, Su
               ["Category", category],
               ["Currency", t.currency],
               ["Status", "Posted on statement"],
-              ["Source", `${t.source.toUpperCase()} import${imp ? ` · ${imp.fileName}` : ""}`],
+              ["Statement", source],
             ].map(([k, v]) => (
               <div key={k} className="flex justify-between gap-4 py-2.5"><dt className="shrink-0 text-muted">{k}</dt><dd className="text-right break-words">{v}</dd></div>
             ))}
@@ -269,6 +280,7 @@ function TxDrawer({ t, bills, onClose }: { t: Transaction; bills: Map<string, Su
           ) : (
             !credit && sameMerchant > 0 && <p className="mt-5 text-[13px] text-muted">{sameMerchant} other transaction{sameMerchant === 1 ? "" : "s"} from this merchant. Not regular enough to count as a bill.</p>
           )}
+          <Link href={`/agent?q=${encodeURIComponent(`Tell me about my payments to ${bill?.displayName ?? payeeName(t.merchant)}`)}`} className="btn btn-ghost mt-4 w-full">Ask the agent about this payee</Link>
         </div>
       </aside>
     </div>

@@ -43,3 +43,14 @@ export function shortHash(h: string, n = 6) {
 
 export const FREQ_LABEL = { weekly: "Weekly", monthly: "Monthly", quarterly: "Quarterly", yearly: "Yearly" } as const;
 export const PER = { weekly: "/wk", monthly: "/mo", quarterly: "/qtr", yearly: "/yr" } as const;
+
+/** Rewrites ISO dates inside generated text ("on 2026-08-03") as "on 3 Aug 2026". */
+export function readableDates(text: string) {
+  return text.replace(/\b(\d{4}-\d{2}-\d{2})\b/g, (d) => date(d));
+}
+
+/** Display name for a payee key such as "salary-credit" → "Salary Credit". */
+export function payeeName(merchant: string) {
+  if (!/^[a-z0-9-]+$/.test(merchant)) return merchant;
+  return merchant.split("-").filter(Boolean).map((w) => (w.length <= 3 && /\d/.test(w) ? w : w[0].toUpperCase() + w.slice(1))).join(" ");
+}

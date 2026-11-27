@@ -6,7 +6,7 @@ import { attentionItems, dueIn, spendingByCategory } from "@/lib/attention";
 import { commitments, income, savingsPotential, toHome, upcomingRenewals } from "@/lib/detection/analysis";
 import { KIND_PLURAL } from "@/lib/detection/merchants";
 import { useRates, useStore } from "@/lib/db/store";
-import { date, money } from "@/lib/format";
+import { date, money, readableDates } from "@/lib/format";
 import { setPendingUpload } from "@/lib/import/pending";
 import type { ObligationKind, Subscription } from "@/lib/types";
 import { Avatar, BillStatus, EmptyPanel, Icon, PageBar, Stat, UploadButton } from "@/components/ui";
@@ -51,7 +51,7 @@ export default function Overview() {
         sub={<>{state.imports?.length ?? 0} statement{(state.imports?.length ?? 0) === 1 ? "" : "s"} · {state.transactions.length} transactions{dates.length ? ` · ${date(dates[0])} – ${date(dates[dates.length - 1])}` : ""}</>}
         actions={
           <>
-            <Link href="/agent" className="btn btn-ghost"><Icon name="agent" size={16} />Ask agent</Link>
+            <Link href="/agent" className="btn btn-ghost">Ask agent</Link>
             <UploadButton label="Upload statement" className="btn btn-ghost" />
           </>
         }
@@ -149,12 +149,12 @@ export default function Overview() {
                 <div className="px-4 py-3 sm:px-5">
                   <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
                     <span className="figure text-[22px]">{money(spend.monthlyTotal, home)}<span className="ml-1 text-[13px] font-normal text-muted">out per month</span></span>
-                    <span className="text-[12.5px] text-muted">{Math.round(spend.recurringShare * 100)}% goes to recurring bills</span>
+                    <span className="flex items-center gap-1.5 text-[12.5px] text-muted"><span className="h-2 w-2 rounded-full bg-accent" />Bills · {Math.round(spend.recurringShare * 100)}% of spending</span>
                   </div>
                   <ul className="space-y-2.5">
                     {spend.categories.slice(0, 8).map((cat) => (
                       <li key={cat.category} className="grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-1 text-[13px]">
-                        <span className="flex items-center gap-2">{cat.category}{cat.recurring && <span className="pill pill-plain">bill</span>}</span>
+                        <span className="flex items-center gap-2">{cat.category}</span>
                         <span className="num text-right">{money(cat.monthly, home)}</span>
                         <span className="col-span-2 h-1.5 overflow-hidden rounded-full bg-paper-2"><span className={`block h-full rounded-full ${cat.recurring ? "bg-accent" : "bg-[#b5ae9f]"}`} style={{ width: `${(cat.monthly / spend.categories[0].monthly) * 100}%` }} /></span>
                       </li>
@@ -198,7 +198,7 @@ export default function Overview() {
                       <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${a.severity === "high" ? "bg-alert" : a.severity === "medium" ? "bg-amber" : "bg-info"}`} />
                       <div className="min-w-0 flex-1">
                         <div className="text-[13.5px] font-medium">{a.title}</div>
-                        <div className="text-[12.5px] text-muted">{a.detail}</div>
+                        <div className="text-[12.5px] text-muted">{readableDates(a.detail)}</div>
                       </div>
                       <Link href={a.href} className="btn btn-ghost btn-sm">{a.action}</Link>
                     </li>
@@ -221,7 +221,7 @@ export default function Overview() {
                       <span className="font-medium">Consider {f.name}</span>
                       <span className="num text-muted">{money(f.monthlyHome ?? f.monthly, f.monthlyHome !== null ? home : f.currency)}/mo</span>
                     </div>
-                    <div className="text-[12.5px] text-muted">{f.reason}</div>
+                    <div className="text-[12.5px] text-muted">{readableDates(f.reason[0].toUpperCase() + f.reason.slice(1))}</div>
                   </li>
                 ))}
                 {inc.nextPayday && (
@@ -234,6 +234,25 @@ export default function Overview() {
                 {!savings.flags.length && !inc.nextPayday && <li className="px-4 py-4 text-[13px] text-muted">No suggestions yet.</li>}
               </ul>
             </section>
+
+            <section className="panel">
+              <div className="panel-head">
+                <span className="panel-title">Statements</span>
+                <Link href="/onboarding" className="text-[12.5px] text-muted hover:text-ink">Add →</Link>
+              </div>
+              <ul>
+                {(state.imports ?? []).slice(0, 4).map((i) => (
+                  <li key={i.id} className="flex items-center justify-between gap-3 border-b rule px-4 py-2.5 text-[13px] last:border-b-0">
+                    <div className="min-w-0">
+                      <div className="truncate font-medium">{i.fileName}</div>
+                      <div className="text-[12px] text-muted">{i.from && i.to ? `${date(i.from)} – ${date(i.to)}` : i.format} · {i.rows} transactions</div>
+                    </div>
+                    <span className="shrink-0 text-[12px] text-faint">{date(i.at.slice(0, 10))}</span>
+                  </li>
+                ))}
+                {!(state.imports ?? []).length && <li className="px-4 py-3 text-[13px] text-muted">No statements on record.</li>}
+              </ul>
+            </section>
           </div>
         </div>
       </div>
@@ -241,7 +260,7 @@ export default function Overview() {
   );
 }
 
-/** Brand-new user: statement upload is the whole page. */
+/** Brand-new user: one clear action, no figures, no filler. */
 function FirstRun() {
   const router = useRouter();
   const input = useRef<HTMLInputElement>(null);
@@ -252,39 +271,43 @@ function FirstRun() {
     router.push("/onboarding");
   };
   return (
-    <div className="px-4 py-8 sm:px-6 lg:px-8 lg:py-12">
-      <div className="mx-auto max-w-4xl">
-        <div className="eyebrow mb-3">Get started</div>
-        <h1 className="title text-[34px] sm:text-[42px]">See what your money is already committed to.</h1>
-        <p className="mt-3 max-w-2xl text-[15px] text-ink-2">Upload a bank or card statement. subscan finds your subscriptions, utility bills and regular payments, shows what&rsquo;s due next, and helps you manage them.</p>
+    <div className="px-4 py-8 sm:px-6 lg:px-8 lg:py-14">
+      <div className="max-w-[640px]">
+        <h1 className="display text-[30px] sm:text-[34px]">Welcome to subscan.</h1>
+        <p className="mt-2 text-[15px] text-ink-2">Upload a bank or card statement and we&rsquo;ll find the bills and subscriptions in it, total what&rsquo;s committed each month and show what&rsquo;s due next.</p>
 
         <div
           onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
           onDragLeave={() => setDrag(false)}
           onDrop={(e) => { e.preventDefault(); setDrag(false); pick(e.dataTransfer.files[0]); }}
-          className={`mt-8 flex flex-col items-center rounded-[10px] border-2 border-dashed px-6 py-12 text-center transition-colors ${drag ? "border-accent bg-accent-wash" : "border-line-strong bg-surface"}`}
+          className={`mt-6 flex flex-col gap-3 rounded-[6px] border px-4 py-4 transition-colors sm:flex-row sm:items-center sm:justify-between ${drag ? "border-accent bg-accent-wash" : "border-dashed border-line-strong bg-surface"}`}
         >
-          <span className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-full bg-accent-wash text-accent"><Icon name="upload" size={22} /></span>
-          <div className="text-[17px] font-semibold">Drop your statement here</div>
-          <p className="mt-1 text-[13.5px] text-muted">PDF downloaded from your bank, or a CSV export · read on this device, never uploaded</p>
-          <button className="btn btn-primary btn-lg mt-5" onClick={() => input.current?.click()}><Icon name="upload" size={17} />Choose a file</button>
-          <input ref={input} type="file" accept=".pdf,.csv,application/pdf,text/csv" className="hidden" onChange={(e) => pick(e.target.files?.[0])} />
+          <div className="min-w-0">
+            <div className="text-[14px] font-medium">{drag ? "Drop to read it" : "Upload a statement"}</div>
+            <div className="text-[12.5px] text-muted">PDF from your bank or a CSV export · drag it here</div>
+          </div>
+          <button className="btn btn-primary shrink-0" onClick={() => input.current?.click()}>Choose file</button>
+          <input ref={input} type="file" accept=".pdf,.csv,application/pdf,text/csv" className="hidden" aria-label="Statement file" onChange={(e) => pick(e.target.files?.[0])} />
         </div>
 
-        <div className="mt-8 grid gap-px overflow-hidden rounded-[8px] border rule bg-rule sm:grid-cols-3">
+        <dl className="mt-8 divide-y divide-[var(--color-rule)] border-y rule text-[13.5px]">
           {[
-            ["1", "We read your transactions", "Dates, payees, amounts and whether money went in or out. You check them before anything is saved."],
-            ["2", "We find what repeats", "Subscriptions, utilities, rent, loans and insurance — with how often they’re charged and how sure we are."],
-            ["3", "You get your overview", "What’s committed each month, what’s due before payday, and what you could cut. Your agent can help from there."],
-          ].map(([n, t, d]) => (
-            <div key={n} className="bg-surface px-5 py-5">
-              <span className="num text-[12px] font-semibold text-accent">{n}</span>
-              <div className="mt-1 text-[14px] font-semibold">{t}</div>
-              <p className="mt-1 text-[13px] text-muted">{d}</p>
+            ["Subscriptions", "Streaming, software, memberships"],
+            ["Utilities", "Electricity, internet, mobile data, TV"],
+            ["Other obligations", "Rent, loan repayments, insurance"],
+            ["For each one", "How much, how often, when it's next due, and price changes"],
+          ].map(([k, v]) => (
+            <div key={k} className="grid grid-cols-[140px_1fr] gap-3 py-2.5 sm:grid-cols-[180px_1fr]">
+              <dt className="font-medium">{k}</dt>
+              <dd className="text-muted">{v}</dd>
             </div>
           ))}
-        </div>
-        <p className="mt-5 text-[12.5px] text-muted">subscan never asks for your bank login or card details. You can delete everything from Settings at any time.</p>
+        </dl>
+
+        <p className="mt-5 flex items-start gap-2 text-[12.5px] text-muted">
+          <Icon name="lock" size={14} className="mt-0.5 shrink-0" />
+          Your statement is read in this browser and never uploaded. Nothing is saved until you review it. subscan never asks for bank logins.
+        </p>
       </div>
     </div>
   );
@@ -302,7 +325,7 @@ function NoRecurring({ spanDays }: { spanDays: number }) {
         action={
           <div className="flex flex-wrap justify-center gap-2">
             <UploadButton label="Upload more months" />
-            <Link href="/bills?add=1" className="btn btn-ghost"><Icon name="plus" size={16} />Add a bill yourself</Link>
+            <Link href="/bills?add=1" className="btn btn-ghost">Add a bill yourself</Link>
           </div>
         }
       >

@@ -6,6 +6,8 @@ import { ATTRIBUTION_CODES } from "@/lib/celo/attribution";
 import { useStore } from "@/lib/db/store";
 import { date } from "@/lib/format";
 import { PageBar } from "@/components/ui";
+import { useWallet } from "@/components/wallet";
+import { shortHash } from "@/lib/format";
 
 interface Status {
   celoRpc: { ok: boolean; block?: string; error?: string };
@@ -16,6 +18,7 @@ interface Status {
 
 export default function Settings() {
   const { state, updateSettings, reset, removeImport } = useStore();
+  const w = useWallet();
   const [status, setStatus] = useState<Status | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
   const [saved, setSaved] = useState<string>();
@@ -32,6 +35,19 @@ export default function Settings() {
   return (
     <div>
       <PageBar title="Settings" sub="How subscan calculates totals, pays network fees and stores what you import." />
+
+      <Section title="Wallet and payments" note="Used only when you choose to pay a bill. subscan never holds your funds.">
+        <div className="flex max-w-2xl flex-wrap items-center justify-between gap-3">
+          <div className="text-[13.5px]">
+            <div className="flex items-center gap-2 font-medium">
+              <span className={`h-2 w-2 rounded-full ${w.address ? (w.onCelo ? "bg-accent" : "bg-alert") : "bg-line-strong"}`} />
+              {w.address ? <span className="font-mono">{shortHash(w.address, 4)}</span> : "No wallet connected"}
+            </div>
+            <div className="text-[12.5px] text-muted">{w.address ? (w.onCelo ? "Celo mainnet" : "Wrong network — switch to Celo") : "Connect one when you're ready to pay a bill."}</div>
+          </div>
+          <Link href="/wallet" className="btn btn-ghost">Wallet, balances and identity</Link>
+        </div>
+      </Section>
 
       <Section title="Preferences" note="Applied immediately and saved on this device.">
         <Field label="Home currency" hint="Totals are shown in this currency. Foreign-currency subscriptions are converted at a live Textile FX rate where one exists.">

@@ -5,7 +5,7 @@ import { attentionItems, dueIn } from "@/lib/attention";
 import { TOKENS } from "@/lib/celo/config";
 import { income, savingsPotential, upcomingRenewals } from "@/lib/detection/analysis";
 import { useRates, useStore } from "@/lib/db/store";
-import { date, money } from "@/lib/format";
+import { date, money, readableDates } from "@/lib/format";
 import type { AppState } from "@/lib/types";
 import { Markdown } from "@/components/bits";
 import { Avatar, EmptyPanel, Icon, PageBar, PayStatus, UploadButton } from "@/components/ui";
@@ -198,7 +198,7 @@ export default function Agent() {
                 <li key={a.id} className="flex items-start justify-between gap-3 px-4 py-3 sm:px-5">
                   <div className="flex min-w-0 gap-3">
                     <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${a.severity === "high" ? "bg-alert" : a.severity === "medium" ? "bg-amber" : "bg-line-strong"}`} />
-                    <div className="min-w-0"><div className="text-[13.5px] font-medium">{a.title}</div><div className="text-[12.5px] text-muted">{a.detail}</div></div>
+                    <div className="min-w-0"><div className="text-[13.5px] font-medium">{a.title}</div><div className="text-[12.5px] text-muted">{readableDates(a.detail)}</div></div>
                   </div>
                   <Link href={a.href} className="btn btn-ghost btn-sm shrink-0">{a.action}</Link>
                 </li>
@@ -209,7 +209,7 @@ export default function Agent() {
                     <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-accent" />
                     <div className="min-w-0">
                       <div className="text-[13.5px] font-medium">Consider cancelling {f.name} <span className="num font-normal text-muted">· saves {money(f.monthlyHome ?? f.monthly, f.monthlyHome !== null ? home : f.currency)}/mo</span></div>
-                      <div className="text-[12.5px] text-muted">{f.reason}</div>
+                      <div className="text-[12.5px] text-muted">{readableDates(f.reason[0].toUpperCase() + f.reason.slice(1))}</div>
                     </div>
                   </div>
                   <button className="btn btn-ghost btn-sm shrink-0" onClick={() => ask(`Should I cancel ${f.name}?`)}>Ask why</button>

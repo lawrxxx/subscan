@@ -12,18 +12,18 @@ const NAV = [
   { href: "/bills", label: "Bills", icon: "bills" },
   { href: "/activity", label: "Activity", icon: "activity" },
   { href: "/agent", label: "Agent", icon: "agent" },
-  { href: "/wallet", label: "Wallet", icon: "wallet" },
 ];
 
 function isActive(path: string, href: string) {
   if (href === "/") return path === "/";
   if (href === "/bills") return path.startsWith("/bills") || path.startsWith("/pay");
+  if (href === "/settings") return path.startsWith("/settings") || path.startsWith("/wallet");
   return path.startsWith(href);
 }
 
 export function Wordmark({ className = "" }: { className?: string }) {
   return (
-    <Link href="/" className={`title inline-flex items-baseline text-[22px] leading-none ${className}`} aria-label="subscan home">
+    <Link href="/" className={`display inline-flex items-baseline text-[22px] leading-none ${className}`} aria-label="subscan home">
       sub<span className="italic">scan</span>
       <span className="ml-[3px] inline-block h-[6px] w-[6px] bg-accent" aria-hidden />
     </Link>
@@ -46,7 +46,7 @@ export function Shell({ children }: { children: ReactNode }) {
         </div>
         <div className="px-3">
           <Link href="/onboarding" className="btn btn-primary w-full">
-            <Icon name="upload" size={16} /> Upload statement
+            Upload statement
           </Link>
         </div>
         <nav className="mt-5 flex flex-col gap-0.5 px-3" aria-label="Main">
@@ -70,9 +70,13 @@ export function Shell({ children }: { children: ReactNode }) {
           <Link href="/settings" className={`flex items-center gap-3 rounded-[5px] px-2.5 py-2 text-[13.5px] font-medium ${path.startsWith("/settings") ? "bg-surface text-ink shadow-[0_0_0_1px_var(--color-rule)]" : "text-muted hover:bg-paper-2 hover:text-ink"}`}>
             <Icon name="settings" size={17} /> Settings
           </Link>
-          <Link href="/wallet" className="mt-2 flex items-center gap-2 rounded-[5px] px-2.5 py-2 text-[12px] text-muted hover:bg-paper-2">
-            <span className={`h-2 w-2 rounded-full ${w.address ? (w.onCelo ? "bg-accent" : "bg-alert") : "bg-line-strong"}`} />
-            {w.address ? <span className="font-mono">{shortHash(w.address, 4)}</span> : "Wallet not connected"}
+          <Link href="/wallet" aria-current={path.startsWith("/wallet") ? "page" : undefined} className={`mt-0.5 flex items-center gap-3 rounded-[5px] px-2.5 py-2 text-[13.5px] font-medium ${path.startsWith("/wallet") ? "bg-surface text-ink shadow-[0_0_0_1px_var(--color-rule)]" : "text-muted hover:bg-paper-2 hover:text-ink"}`}>
+            <Icon name="wallet" size={17} />
+            <span className="flex-1">Wallet</span>
+            <span className="flex items-center gap-1.5 text-[11.5px] font-normal">
+              <span className={`h-1.5 w-1.5 rounded-full ${w.address ? (w.onCelo ? "bg-accent" : "bg-alert") : "bg-line-strong"}`} />
+              {w.address ? <span className="font-mono">{shortHash(w.address, 3)}</span> : "Off"}
+            </span>
           </Link>
         </div>
       </aside>
@@ -81,15 +85,15 @@ export function Shell({ children }: { children: ReactNode }) {
       <header className="sticky top-0 z-20 flex items-center justify-between border-b rule bg-paper/95 px-4 py-3 backdrop-blur lg:hidden">
         <Wordmark className="text-[20px]" />
         <div className="flex items-center gap-1">
-          <Link href="/onboarding" className="btn btn-primary btn-sm" aria-label="Upload statement"><Icon name="upload" size={15} />Upload</Link>
-          <Link href="/settings" className="btn btn-quiet btn-sm" aria-label="Settings"><Icon name="settings" size={17} /></Link>
+          <Link href="/onboarding" className="btn btn-primary btn-sm" aria-label="Upload statement">Upload</Link>
+          <Link href="/settings" className="btn btn-quiet btn-sm" aria-label="Settings and wallet"><Icon name="settings" size={18} /></Link>
         </div>
       </header>
 
-      <main className="min-w-0 pb-24 lg:pb-10">{children}</main>
+      <main className="min-w-0 pb-24 lg:pb-10"><div className="mx-auto max-w-[1200px]">{children}</div></main>
 
       {/* Mobile tab bar */}
-      <nav className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-5 border-t rule bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden" aria-label="Main">
+      <nav className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-4 border-t rule bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden" aria-label="Main">
         {NAV.map((n) => {
           const on = isActive(path, n.href);
           return (
