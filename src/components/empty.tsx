@@ -11,9 +11,9 @@ export function NoData({ kicker, title, children }: { kicker: string; title: str
       <div className="px-4 py-14 sm:px-8 lg:border-r lg:rule lg:px-12 lg:py-24">
         <div className="kicker mb-4">{kicker}</div>
         <h1 className="display max-w-xl text-[44px] sm:text-[60px]">{title}</h1>
-        <p className="mt-4 max-w-md text-[16px] text-muted">{children ?? "Import a CSV from your bank or card and subscan will find the payments that repeat."}</p>
+        <p className="mt-4 max-w-md text-[16px] text-muted">{children ?? "Upload a bank or card statement (PDF or CSV) and subscan will find every bill and subscription in it."}</p>
         <div className="mt-8 flex flex-wrap gap-3">
-          <Link href="/onboarding" className="btn btn-primary">Import a statement</Link>
+          <Link href="/onboarding" className="btn btn-primary">Upload a statement</Link>
           <button className="btn btn-ghost" onClick={() => loadSample()}>Explore with sample data</button>
         </div>
       </div>
@@ -21,9 +21,9 @@ export function NoData({ kicker, title, children }: { kicker: string; title: str
         <div className="kicker mb-4">What you&rsquo;ll see</div>
         <ol className="space-y-5">
           {[
-            ["Every recurring charge", "Detected from billing intervals, amounts and merchant names — with a confidence score."],
-            ["What it really costs", "Monthly and annual totals, price rises, overlapping services."],
-            ["Payments you approve", "The agent prepares a cross-currency payment on Celo; nothing moves until you sign."],
+            ["Every bill, found", "Subscriptions, utilities, rent, loans and insurance — detected from how often and how much you pay."],
+            ["What’s already committed", "How much of your income is spoken for, what’s due before payday, and what you could cut."],
+            ["An agent that helps", "Ask about your bills in plain language. It prepares payments; nothing moves until you approve."],
           ].map(([t, d], i) => (
             <li key={t} className="grid grid-cols-[28px_1fr] border-t rule pt-4">
               <span className="num text-[12px] text-faint">0{i + 1}</span>

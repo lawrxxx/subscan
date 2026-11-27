@@ -19,16 +19,16 @@ export type ChatTurn = { role: "user" | "assistant"; content: string };
 
 const MODEL = process.env.SUBSCAN_AGENT_MODEL || "claude-opus-5-5";
 
-const SYSTEM = `You are the subscan agent: a careful subscription and payments assistant inside a consumer fintech app on Celo mainnet.
+const SYSTEM = `You are subscan, a personal bills and subscriptions agent. You help ordinary people understand what their money is committed to and manage upcoming payments. Most users know nothing about crypto — speak plainly about bills, money in and money out.
 
 Ground rules:
-- Answer only from tool results. Call tools to fetch the user's real subscriptions, spend, renewals, balances and payment status; never guess numbers.
-- Subscription data comes from transactions the user imported. Renewal dates are estimates from billing history; say so when it matters.
-- You cannot move money. prepare_payment builds a draft with a live indicative Textile FX quote; the user reviews and approves every on-chain transaction on the review screen. Say this plainly when you prepare a payment and give the review link from the tool result as a markdown link.
-- If a subscription has no verified merchant payment method, explain that the user must add the merchant's Celo receiving address or x402 endpoint on the subscription page. Never invent addresses.
-- Waste flags are suggestions for the user to judge, not conclusions.
-- To confirm, dismiss or restore subscriptions use propose_subscription_changes. It only proposes: tell the user to press Apply below your answer.
-- Write concisely: short paragraphs or tight lists, amounts with currency codes, no filler. Use markdown sparingly.`;
+- Answer only from tool results. Fetch the user's real bills, transactions, income, spending and payments with tools; never guess numbers.
+- Bills come from bank/card statements the user imported (or added by hand). Due dates are estimates from billing history; say so when it matters. Variable bills (electricity, water) use a typical amount.
+- "How much do I owe this month": use upcoming_renewals / income_and_payday and include any expected payments missing from the statement.
+- Savings and "can I cancel" answers are suggestions — the user decides. You cannot cancel anything; say what the user would need to do (e.g. cancel in the provider's app).
+- You cannot move money. prepare_payment builds a draft with a live quote; the user reviews and approves every transaction on the review screen. Give the review link from the tool result as a markdown link. Payments settle in digital dollars (USD₮) or naira (cNGN) on Celo, only to a recipient the user has verified. Most utility providers and many merchants don't accept these yet — if a bill has no verified payment method, say so and explain the user can add the provider's Celo address or x402 link on the bill's page if the provider supports it. Never invent addresses or claim a bill was paid.
+- To confirm, dismiss, restore or re-categorise bills use propose_subscription_changes. It only proposes: tell the user to press the button below your answer.
+- Write concisely: short paragraphs or tight lists, amounts with currency, no filler. Use markdown sparingly.`;
 
 export async function runClaude(history: ChatTurn[], ctx: ToolContext): Promise<AgentReply> {
   const client = new Anthropic();
@@ -107,14 +107,53 @@ export async function runLocal(message: string, ctx: ToolContext): Promise<Agent
   if (action) {
     const named = ctx.state.subscriptions.filter((s) => m.includes(s.displayName.toLowerCase()) || m.includes(s.merchant));
     const refs = named.length ? named.map((s) => s.id) : /(all|everything|high|confident)/.test(m) ? ["high_confidence"] : [];
-    if (!refs.length) return { text: `Which subscription should I ${action}? Name it, or say "${action} all high-confidence ones".`, trace, mode: "local" };
+    if (!refs.length) return { text: `Which bill should I ${action}? Name it, or say "${action} all high-confidence ones".`, trace, mode: "local" };
     const r = await call("propose_subscription_changes", { action, refs });
     if (!r.changes.length) return { text: "Nothing to change — those are already in that state.", trace, mode: "local" };
-    return { text: `Ready to ${action} ${r.changes.length} subscription${r.changes.length > 1 ? "s" : ""}. Check the list below and press **${action[0].toUpperCase() + action.slice(1)}** to apply it — nothing changes until you do.`, trace, mode: "local" };
+    return { text: `Ready to ${action} ${r.changes.length} bill${r.changes.length > 1 ? "s" : ""}. Check the list below and press **${action[0].toUpperCase() + action.slice(1)}** to apply it — nothing changes until you do.`, trace, mode: "local" };
   }
-  if (/(prepare|pay|settle)/.test(m)) {
+  const listing = /\b(show|list|what are|all my)\b.*\b(bills|subscriptions|utilities|obligations|payments i make)\b/.test(m) && !/due|coming|next|owe/.test(m);
+  if (/payday|salary|before .*paid|left after/.test(m)) {
+    const r = await call("income_and_payday");
+    if (!r.next_payday) return { text: r.note ?? "I couldn’t find regular income in your statement.", trace, mode: "local" };
+    const lines = [
+      `Next payday looks like **${r.next_payday}** (regular income about ${fmt(r.regular_monthly_income, r.currency)}/month).`,
+      r.committed_monthly !== null ? `About ${fmt(r.committed_monthly, r.currency)} a month — ${Math.round((r.committed_share_of_income ?? 0) * 100)}% of that income — is already committed to bills.` : "",
+      r.due_before_payday.length ? `Due before then (${fmt(r.due_before_payday_total, r.currency)}):` : "Nothing else is due before payday.",
+      ...r.due_before_payday.map((b: any) => `- ${b.expected_payment_missing ? "⚠ " : ""}**${b.name}** — ${fmt(b.amount, b.currency)}${b.expected_payment_missing ? ` (expected ${b.expected_payment_missing}, not in statement)` : `, due ${b.next_renewal}`}`),
+    ].filter(Boolean);
+    return { text: lines.join("\n"), trace, mode: "local" };
+  }
+  if (/where.*(money|spend)|going|breakdown|analy[sz]e (my )?statement/.test(m)) {
+    const r = await call("spending_breakdown");
+    if (!r.period) return { text: "No transactions imported yet.", trace, mode: "local" };
+    return {
+      text: [
+        `From ${r.period.from} to ${r.period.to} you spent ${fmt(r.total_out, r.currency)} — about ${fmt(r.monthly_average_out, r.currency)} a month. ${Math.round(r.recurring_bills_share * 100)}% went to recurring bills.`,
+        ...r.by_category.slice(0, 7).map((c: any) => `- ${c.category}: ${fmt(c.per_month, r.currency)}/month`),
+      ].join("\n"),
+      trace,
+      mode: "local",
+    };
+  }
+  if (/(could|can) i save|how much.*save|savings/.test(m)) {
+    const r = await call("savings_analysis");
+    if (!r.suggestions.length) return { text: "Nothing obvious to cut — no overlapping services or big price rises.", trace, mode: "local" };
+    return {
+      text: [`You could save about **${fmt(r.potential_monthly_saving, r.currency)} a month** (${fmt(r.potential_yearly_saving, r.currency)} a year) if you act on these:`, ...r.suggestions.slice(0, 6).map((f: any) => `- **${f.name}**: ${f.reason}`), "", "These are suggestions — cancel in each provider’s app if you agree."].join("\n"),
+      trace,
+      mode: "local",
+    };
+  }
+  if (/\b(when did i|find|search|transactions? (to|from|for))\b/.test(m)) {
+    const q = m.replace(/.*\b(when did i pay|find|search( for)?|transactions? (to|from|for))\b/, "").replace(/[?.!]/g, "").trim().split(" ").slice(0, 3).join(" ");
+    const r = await call("search_transactions", { query: q });
+    if (!r.matches) return { text: `No transactions matching “${q}”.`, trace, mode: "local" };
+    return { text: [`${r.matches} transactions matching “${q}” (out ${fmt(r.total_out, ctx.state.settings.homeCurrency)}):`, ...r.transactions.slice(0, 8).map((t: any) => `- ${t.date} · ${t.description} · ${t.direction === "credit" ? "+" : ""}${fmt(t.amount, t.currency)}`)].join("\n"), trace, mode: "local" };
+  }
+  if (/\bprepare\b|\bpay (my|for|the|off)\b|\bsettle\b/.test(m)) {
     const intl = /international|foreign|usd|dollar/.test(m);
-    const named = ctx.state.subscriptions.find((s) => m.includes(s.displayName.toLowerCase()));
+    const named = ctx.state.subscriptions.find((s) => m.includes(s.displayName.toLowerCase()) || (s.status !== "dismissed" && m.includes(s.category.toLowerCase())));
     const r = await call("prepare_payment", { ...(named ? { ref: named.id } : {}), international_only: intl && !named });
     if (r.error) return { text: r.error, trace, mode: "local" };
     const lines = [`Prepared a draft for **${r.subscription.name}** — ${fmt(r.subscription.amount, r.subscription.currency)}, renews ${r.subscription.next_renewal}.`];
@@ -127,6 +166,11 @@ export async function runLocal(message: string, ctx: ToolContext): Promise<Agent
   }
   if (/(wast|cancel|sav(e|ing)|unused|duplicate|overlap)/.test(m)) {
     const r = await call("find_waste");
+    if (/duplicate|overlap|twice/.test(m)) {
+      const d = r.flags.filter((f: any) => /overlapping|billed \d+ times|running at once/.test(f.reason));
+      if (!d.length) return { text: "No duplicate or overlapping payments found.", trace, mode: "local" };
+      return { text: ["Possible duplicates and overlaps:", ...d.map((f: any) => `- **${f.name}** (${fmt(f.monthly, f.currency)}/mo): ${f.reason}`), "", "Keep the one you use; cancel the rest in each provider’s app."].join("\n"), trace, mode: "local" };
+    }
     if (!r.flags.length) return { text: "Nothing stands out — no overlaps, price jumps or lapsed plans.", trace, mode: "local" };
     return {
       text: ["Worth a look:", ...r.flags.slice(0, 6).map((f: any) => `- **${f.name}** (${fmt(f.monthly, f.currency)}/mo): ${f.reason}`)].join("\n"),
@@ -134,19 +178,38 @@ export async function runLocal(message: string, ctx: ToolContext): Promise<Agent
       mode: "local",
     };
   }
-  if (/(next|renew|upcoming|due)/.test(m)) {
-    const r = await call("upcoming_renewals", { within_days: 60 });
-    if (!r.renewals.length) return { text: "No renewals expected in the next 60 days.", trace, mode: "local" };
-    const n = r.renewals[0];
+  if (/\bowe\b|this month/.test(m)) {
+    const end = new Date(Date.parse(ctx.today));
+    const monthEnd = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
+    const days = Math.max(1, Math.round((Date.parse(monthEnd) - Date.parse(ctx.today)) / 86_400_000));
+    const r = await call("upcoming_renewals", { within_days: days });
+    const missed = ctx.state.subscriptions.filter((s) => s.status !== "dismissed" && !s.lapsed && s.missed);
+    const byCcy = new Map<string, number>();
+    for (const b of [...r.renewals, ...missed.map((s) => ({ amount: s.amount, currency: s.currency }))]) byCcy.set(b.currency, (byCcy.get(b.currency) ?? 0) + b.amount);
+    if (!r.renewals.length && !missed.length) return { text: `Nothing else is due before the end of the month (${monthEnd}).`, trace, mode: "local" };
     return {
-      text: [`Next up: **${n.name}** on ${n.next_renewal} (${n.days_until} days) — ${fmt(n.amount, n.currency)}.`, ...r.renewals.slice(1, 5).map((s: any) => `- ${s.name}: ${s.next_renewal}, ${fmt(s.amount, s.currency)}`)].join("\n"),
+      text: [
+        `Still to pay before ${monthEnd}: **${[...byCcy].map(([c, v]) => fmt(v, c)).join(" + ")}**`,
+        ...missed.map((s) => `- ⚠ **${s.displayName}** — ${fmt(s.amount, s.currency)} (expected ${s.missed!.expected}, not in your statement)`),
+        ...r.renewals.map((b: any) => `- **${b.name}** — ${b.bill_type === "variable" ? "≈" : ""}${fmt(b.amount, b.currency)}, due ${b.next_renewal}`),
+      ].join("\n"),
       trace,
       mode: "local",
     };
   }
-  if (/(spend|cost|total|month|year|annual)/.test(m)) {
+  if (/(next|renew|upcoming|due|coming up)/.test(m)) {
+    const r = await call("upcoming_renewals", { within_days: 60 });
+    if (!r.renewals.length) return { text: "No renewals expected in the next 60 days.", trace, mode: "local" };
+    const n = r.renewals[0];
+    return {
+      text: [`Next up: **${n.name}** on ${n.next_renewal} (${n.days_until === 0 ? "today" : n.days_until === 1 ? "tomorrow" : `in ${n.days_until} days`}) — ${fmt(n.amount, n.currency)}.`, ...r.renewals.slice(1, 5).map((s: any) => `- ${s.name}: ${s.next_renewal}, ${fmt(s.amount, s.currency)}`)].join("\n"),
+      trace,
+      mode: "local",
+    };
+  }
+  if (!listing && /(spend|cost|total|month|year|annual)/.test(m)) {
     const r = await call("spending_analysis");
-    const lines = r.byCurrency.map((c: any) => `- ${fmt(c.monthly, c.currency)} per month across ${c.count} subscriptions`);
+    const lines = r.byCurrency.map((c: any) => `- ${fmt(c.monthly, c.currency)} per month across ${c.count} bills`);
     if (r.monthlyHome !== null) lines.unshift(`About **${fmt(r.monthlyHome, r.home)} per month**, ${fmt(r.annualHome, r.home)} a year (foreign amounts converted at the live Textile FX rate).`);
     return { text: lines.join("\n"), trace, mode: "local" };
   }
@@ -160,10 +223,16 @@ export async function runLocal(message: string, ctx: ToolContext): Promise<Agent
     if (!r.payments.length) return { text: "No payments recorded yet.", trace, mode: "local" };
     return { text: r.payments.map((p: any) => `- ${p.merchant}: ${p.status}`).join("\n"), trace, mode: "local" };
   }
-  const r = await call("list_subscriptions", { status: "active", international_only: /international|foreign/.test(m) });
-  if (!r.count) return { text: "No subscriptions yet — import a statement first.", trace, mode: "local" };
+  const type = /utilit|electric|internet|water/.test(m) ? "utility" : /rent|loan|insurance|obligation/.test(m) ? "obligation" : /subscription/.test(m) && !/bill/.test(m) ? "subscription" : "all";
+  const r = await call("list_subscriptions", { status: "active", type, international_only: /international|foreign/.test(m) });
+  if (!r.count) return { text: "No bills yet — upload a statement first.", trace, mode: "local" };
+  const label: Record<string, string> = { subscription: "Subscriptions", utility: "Utilities", obligation: "Other obligations" };
+  const groups = ["subscription", "utility", "obligation"].map((k) => ({ k, list: r.subscriptions.filter((s: any) => s.type === k) })).filter((g) => g.list.length);
   return {
-    text: [`${r.count} subscriptions:`, ...r.subscriptions.map((s: any) => `- **${s.name}** — ${fmt(s.amount, s.currency)} ${s.frequency}, next ${s.next_renewal}`)].join("\n"),
+    text: [
+      `${r.count} recurring bills:`,
+      ...groups.flatMap((g) => [`**${label[g.k]}**`, ...g.list.map((s: any) => `- ${s.name} — ${s.bill_type === "variable" ? "≈" : ""}${fmt(s.amount, s.currency)} ${s.frequency}, next ${s.next_renewal}`)]),
+    ].join("\n"),
     trace,
     mode: "local",
   };

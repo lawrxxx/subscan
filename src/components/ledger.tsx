@@ -42,6 +42,9 @@ export function Ledger({
                 <div className="truncate text-[15px] font-medium group-hover:underline">{s.displayName}</div>
                 <div className="text-[12px] text-muted">
                   {s.category}
+                  {s.billType === "variable" && <> · <span className="text-ink-2">varies</span></>}
+                  {s.manual && <> · added by you</>}
+                  {s.missed && <> · <span className="text-alert">expected payment missing</span></>}
                   {s.international && <> · <span className="text-ink-2">{s.currency}</span></>}
                   {s.priceChange && s.priceChange.pct > 0 && <> · <span className="text-alert">price up</span></>}
                   {s.payment && <> · <span className="text-accent">payable on Celo</span></>}
@@ -54,7 +57,7 @@ export function Ledger({
               </div>
               <span className="hidden text-[13px] md:block">{FREQ_LABEL[s.frequency]}</span>
               <span className={`num text-[12px] md:text-[13px] ${s.lapsed ? "text-faint line-through" : "text-muted md:text-ink"}`} title={s.lapsed ? "No recent charge — renewal may not happen" : "Estimated"}>{date(s.nextRenewal)}</span>
-              <span className="num hidden text-right text-[14px] md:block">{money(s.amount, s.currency)}</span>
+              <span className="num hidden text-right text-[14px] md:block">{s.billType === "variable" ? "≈" : ""}{money(s.amount, s.currency)}</span>
               <span className="num hidden text-right text-[13px] text-muted md:block">{yearly === null ? "—" : money(yearly, home)}</span>
               <span className="hidden md:block"><Confidence value={s.confidence} /></span>
               <div className="col-span-2 flex items-center justify-start gap-2 md:col-span-1 md:justify-end">

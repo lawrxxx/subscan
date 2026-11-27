@@ -53,13 +53,14 @@ export interface FirmQuote {
 }
 
 export class TextileError extends Error {
-  constructor(
-    message: string,
-    public status: number,
-    public reason?: string,
-    public requestId?: string | null,
-  ) {
+  status: number;
+  reason?: string;
+  requestId?: string | null;
+  constructor(message: string, status: number, reason?: string, requestId?: string | null) {
     super(message);
+    this.status = status;
+    this.reason = reason;
+    this.requestId = requestId;
   }
 }
 

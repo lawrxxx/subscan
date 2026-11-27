@@ -8,10 +8,19 @@ export interface Transaction {
   date: string; // ISO yyyy-mm-dd
   description: string;
   merchant: string; // normalised merchant key/label
-  amount: number; // positive = money out
+  amount: number; // always positive; see direction
   currency: Currency;
-  source: "csv" | "sample" | "mono";
+  /** Money out (debit) or in (credit). Older records without it are debits. */
+  direction?: "debit" | "credit";
+  source: "csv" | "pdf" | "sample" | "manual" | "mono";
+  /** Stable key for de-duplicating repeat imports of the same statement. */
+  fingerprint?: string;
 }
+
+/** Subscriptions, utilities, and other recurring obligations (rent, loans, insurance…). */
+export type ObligationKind = "subscription" | "utility" | "obligation";
+/** Fixed bills charge the same each time; variable bills (e.g. electricity) move around. */
+export type BillType = "fixed" | "variable";
 
 export type Frequency = "weekly" | "monthly" | "quarterly" | "yearly";
 
@@ -54,6 +63,15 @@ export interface Subscription {
   priceChange?: { from: number; to: number; date: string; pct: number };
   international: boolean; // billed in a currency other than the home currency
   lapsed?: boolean; // no charge for more than ~2 billing periods — probably cancelled
+  kind?: ObligationKind; // defaults to "subscription" for older records
+  billType?: BillType; // defaults to "fixed"
+  /** Typical amount for variable bills (median of recent charges). */
+  typicalAmount?: number;
+  /** An expected charge that is missing from the statement period. */
+  missed?: { expected: string };
+  /** Latest charge is far above the usual amount. */
+  unusual?: { amount: number; typical: number; date: string };
+  manual?: boolean; // added by the user rather than detected
   payment?: PaymentTarget;
   edited?: boolean;
 }
@@ -105,5 +123,18 @@ export interface AppState {
   payments: PaymentRecord[];
   settings: AppSettings;
   importedAt?: string;
-  dataSource?: "csv" | "sample" | "mono";
+  dataSource?: "csv" | "pdf" | "sample" | "mono";
+  /** Imports performed, newest first (metadata only — raw files are never stored). */
+  imports?: ImportRecord[];
+}
+
+export interface ImportRecord {
+  id: string;
+  at: string;
+  fileName: string;
+  format: string; // e.g. "csv", "pdf: generic table"
+  rows: number; // rows added
+  duplicates: number; // rows skipped as already imported
+  from?: string;
+  to?: string;
 }

@@ -15,7 +15,7 @@ interface Status {
 }
 
 export default function Settings() {
-  const { state, updateSettings, reset, loadSample } = useStore();
+  const { state, updateSettings, reset, loadSample, removeImport } = useStore();
   const [status, setStatus] = useState<Status | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
   const [saved, setSaved] = useState<string>();
@@ -64,6 +64,25 @@ export default function Settings() {
           <Integration name="Storage" ok detail="This browser (localStorage) — no server database" />
           <Integration name="Transaction attribution (ERC-8021)" ok={status ? true : undefined} warn={!status?.attribution?.assigned} detail={status ? `App code “${ATTRIBUTION_CODES.join("”, “")}”${status.attribution?.assigned ? "" : " · no hackathon code set"}` : undefined} />
         </ul>
+      </Section>
+
+      <Section title="Imported statements" note="Only the extracted transactions are kept — never the files. Removing an import deletes its transactions and re-runs detection.">
+        {state.imports?.length ? (
+          <ul className="max-w-2xl border-t border-ink">
+            {state.imports.map((i) => (
+              <li key={i.id} className="flex flex-wrap items-center justify-between gap-3 border-b rule py-3 text-[14px]">
+                <span className="min-w-0">
+                  <span className="block truncate font-medium">{i.fileName}</span>
+                  <span className="text-[12px] text-muted">{i.format} · {i.rows} transactions{i.duplicates ? ` · ${i.duplicates} duplicates skipped` : ""}{i.from ? ` · ${i.from} → ${i.to}` : ""}</span>
+                </span>
+                <button className="text-[13px] text-alert link" onClick={() => { removeImport(i.id); flash(`Removed ${i.fileName}`); }}>Remove</button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-[14px] text-muted">No statements imported yet.</p>
+        )}
+        <Link href="/onboarding" className="btn btn-ghost">Upload a statement</Link>
       </Section>
 
       <Section title="Your data" note="Everything below is stored in this browser only.">

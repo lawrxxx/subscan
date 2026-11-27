@@ -28,10 +28,6 @@ export const ATTRIBUTION_CODES: string[] = [...new Set(["subscan", ...(VALID.tes
 /** True when the assigned code is the one the Builders platform would derive from this repo. */
 export const ASSIGNED_MATCHES_REPO = assigned === REPO_CODE;
 
-if (!ASSIGNED_MATCHES_REPO && typeof console !== "undefined") {
-  // Guide: "check it against your repository" — a stale or copied code credits nobody.
-  console.warn(`[attribution] assigned code ${assigned} does not match codeFromRepo("${REPO}") = ${REPO_CODE}; tagging with both.`);
-}
 
 export const ATTRIBUTION_SUFFIX: Hex = toDataSuffix(ATTRIBUTION_CODES) as Hex;
 

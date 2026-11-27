@@ -8,7 +8,7 @@ import { shortHash } from "@/lib/format";
 
 const NAV = [
   { href: "/", label: "Overview", n: "01", short: "Overview" },
-  { href: "/subscriptions", label: "Subscriptions", n: "02", short: "Subs" },
+  { href: "/subscriptions", label: "Bills", n: "02", short: "Bills" },
   { href: "/agent", label: "Agent", n: "03", short: "Agent" },
   { href: "/activity", label: "Payments", n: "04", short: "Payments" },
   { href: "/wallet", label: "Wallet", n: "05", short: "Wallet" },
@@ -41,7 +41,7 @@ export function Shell({ children }: { children: ReactNode }) {
       <aside className="hidden border-r rule lg:flex lg:flex-col lg:sticky lg:top-0 lg:h-dvh">
         <div className="px-7 pt-8 pb-10">
           <Wordmark />
-          <p className="mt-2 text-[12px] leading-snug text-muted">Subscription intelligence,<br />settled on Celo.</p>
+          <p className="mt-2 text-[12px] leading-snug text-muted">Your bills and<br />subscriptions agent.</p>
         </div>
         <nav className="flex flex-col px-4">
           {NAV.map((n) => (

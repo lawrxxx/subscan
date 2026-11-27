@@ -1,5 +1,5 @@
 import type { Frequency, Subscription, Transaction } from "../types.ts";
-import { matchKnown, merchantCategory, merchantLabel, SUBSCRIPTION_HINTS } from "./merchants.ts";
+import { classify as classifyMerchant, matchKnown, merchantLabel, SUBSCRIPTION_HINTS } from "./merchants.ts";
 
 const DAY = 86_400_000;
 
@@ -75,6 +75,7 @@ interface Candidate {
   frequency: Frequency;
   regularity: number; // share of intervals consistent with the cadence
   amountStability: number; // 1 - coefficient of variation (excluding a single step change)
+  prepaid?: boolean;
 }
 
 function evaluate(txs: Transaction[]): Candidate | null {
@@ -110,6 +111,14 @@ function evaluate(txs: Transaction[]): Candidate | null {
   return { txs: uniq, intervalDays: Math.round(med), frequency: cls.frequency, regularity, amountStability: Math.max(0, 1 - best * 4) };
 }
 
+/** Prepaid purchases (e.g. electricity tokens) spanning ≥2 months → one monthly variable bill. */
+function prepaidMonthly(txs: Transaction[]): Candidate | null {
+  const sorted = [...txs].sort((a, b) => toTime(a.date) - toTime(b.date));
+  const spanDays = (toTime(sorted[sorted.length - 1].date) - toTime(sorted[0].date)) / DAY;
+  if (spanDays < 55) return null;
+  return { txs: sorted, intervalDays: 30, frequency: "monthly", regularity: 0.75, amountStability: 0.4, prepaid: true };
+}
+
 export interface DetectOptions {
   today?: string;
   homeCurrency?: string;
@@ -120,8 +129,11 @@ export function detectSubscriptions(transactions: Transaction[], opts: DetectOpt
   const today = opts.today ?? isoDate(Date.now());
   const home = opts.homeCurrency ?? "NGN";
   const min = opts.minConfidence ?? 0.45;
+  const debits = transactions.filter((t) => (t.direction ?? "debit") === "debit");
+  // Last date the statement covers — used to spot expected charges that never came.
+  const statementEnd = debits.reduce((m, t) => (t.date > m ? t.date : m), "");
   const byMerchant = new Map<string, Transaction[]>();
-  for (const t of transactions) {
+  for (const t of debits) {
     const k = `${t.merchant}|${t.currency}`;
     byMerchant.set(k, [...(byMerchant.get(k) ?? []), t]);
   }
@@ -130,8 +142,20 @@ export function detectSubscriptions(transactions: Transaction[], opts: DetectOpt
   for (const [key, txs] of byMerchant) {
     if (txs.length < 2) continue;
     let candidates: Candidate[] = [];
+    const cls = classifyMerchant(txs[0].description);
     const whole = evaluate(txs);
-    if (whole && whole.regularity >= 0.7 && whole.amountStability >= 0.5) candidates = [whole];
+    // Variable bills (electricity, water, school fees) move in amount but keep a rhythm.
+    const variableOk = cls.billType === "variable" || cls.kind !== "subscription";
+    // Unknown merchants with no "plan/subscription" wording must charge near-identical
+    // amounts — regular shopping (groceries every month) is not a bill.
+    const hinted = !!cls.known || txs.some((t) => SUBSCRIPTION_HINTS.test(t.description));
+    const minStability = variableOk ? 0 : hinted ? 0.5 : 0.85;
+    if (whole && whole.regularity >= 0.7 && whole.amountStability >= minStability) candidates = [whole];
+    else if (cls.prepaid && txs.length >= 3) {
+      // Prepaid utilities (electricity tokens) are bought ad hoc: show a monthly average.
+      const p = prepaidMonthly(txs);
+      if (p) candidates = [p];
+    }
     else {
       // Real subscriptions bill near-identical amounts; frequent ad-hoc spend
       // at one merchant (rides, cafes) only clusters loosely.
@@ -145,6 +169,7 @@ export function detectSubscriptions(transactions: Transaction[], opts: DetectOpt
     candidates.forEach((c, idx) => {
       const sample = c.txs[c.txs.length - 1];
       const known = matchKnown(sample.description);
+      const kindInfo = classifyMerchant(sample.description);
       const hinted = c.txs.some((t) => SUBSCRIPTION_HINTS.test(t.description));
       const reasons: string[] = [];
       let score = 0;
@@ -154,11 +179,14 @@ export function detectSubscriptions(transactions: Transaction[], opts: DetectOpt
       score += 0.3 * c.regularity;
       if (c.regularity >= 0.9) reasons.push(`Consistent ${c.frequency} cadence`);
       else reasons.push(`${Math.round(c.regularity * 100)}% of intervals match a ${c.frequency} cadence`);
-      score += 0.25 * c.amountStability;
-      if (c.amountStability >= 0.85) reasons.push("Amount is stable");
+      // Variable bills aren't penalised for moving amounts.
+      score += 0.25 * (kindInfo.billType === "variable" || c.prepaid ? Math.max(c.amountStability, 0.8) : c.amountStability);
+      if (c.prepaid) reasons.push(`Bought ${c.txs.length} times — prepaid, shown as a monthly average`);
+      else if (c.amountStability >= 0.85) reasons.push("Amount is stable");
+      else if (kindInfo.billType === "variable") reasons.push("Amount varies — a usage-based bill");
       if (known) {
         score += 0.15;
-        reasons.push(`Known subscription merchant (${known.name})`);
+        reasons.push(`Known ${kindInfo.kind === "subscription" ? "subscription" : kindInfo.kind === "utility" ? "utility" : "bill"} provider (${known.name})`);
       } else if (hinted) {
         score += 0.08;
         reasons.push("Description mentions a plan or subscription");
@@ -179,8 +207,19 @@ export function detectSubscriptions(transactions: Transaction[], opts: DetectOpt
       if (confidence < min) return;
 
       const history = c.txs.map((t) => ({ date: t.date, amount: t.amount }));
+      const amounts = history.map((h) => h.amount);
+      const typical = Math.round(median(amounts.slice(-4)) * 100) / 100;
+      const billType = c.prepaid || kindInfo.billType === "variable" || c.amountStability < 0.9 ? "variable" : "fixed";
+      // Prepaid: monthly average over the span. Variable: typical recent charge.
+      const months = Math.max(1, (toTime(last.date) - toTime(c.txs[0].date)) / DAY / 30.44);
+      const displayAmount = c.prepaid ? Math.round((c.txs.reduce((x, t) => x + t.amount, 0) / months) * 100) / 100 : billType === "variable" ? typical : last.amount;
+      const prevTypical = amounts.length >= 4 ? median(amounts.slice(-5, -1)) : 0;
+      const unusual = billType === "variable" && prevTypical && last.amount > prevTypical * 1.5 ? { amount: last.amount, typical: prevTypical, date: last.date } : undefined;
+      const expected = addPeriod(last.date, c.frequency, c.intervalDays);
+      const grace = c.frequency === "yearly" ? 21 : c.frequency === "weekly" ? 3 : 7;
+      const missed = !stale && !c.prepaid && statementEnd && toTime(expected) + grace * DAY < toTime(statementEnd) ? { expected } : undefined;
       let priceChange: Subscription["priceChange"];
-      for (let i = history.length - 1; i > 0; i--) {
+      for (let i = history.length - 1; i > 0 && billType === "fixed"; i--) {
         const prev = history[i - 1].amount;
         const cur = history[i].amount;
         if (prev > 0 && Math.abs(cur - prev) / prev >= 0.03) {
@@ -192,14 +231,19 @@ export function detectSubscriptions(transactions: Transaction[], opts: DetectOpt
       subs.push({
         id: `${merchant}-${sample.currency}-${idx}`,
         merchant,
-        displayName: known?.name ?? merchantLabel(sample.description),
-        category: merchantCategory(sample.description),
-        amount: last.amount,
+        displayName: known && !known.generic ? known.name : merchantLabel(sample.description),
+        category: kindInfo.category,
+        kind: kindInfo.kind,
+        billType,
+        typicalAmount: billType === "variable" ? displayAmount : undefined,
+        unusual,
+        missed,
+        amount: displayAmount,
         currency: sample.currency,
         frequency: c.frequency,
         intervalDays: c.intervalDays,
         lastCharge: last.date,
-        nextRenewal: projectNextRenewal(last.date, c.frequency, c.intervalDays, today),
+        nextRenewal: missed ? expected : projectNextRenewal(last.date, c.frequency, c.intervalDays, today),
         firstSeen: c.txs[0].date,
         chargeCount: c.txs.length,
         totalSpent: Math.round(c.txs.reduce((s, t) => s + t.amount, 0) * 100) / 100,
@@ -228,10 +272,12 @@ export function mergeWithPrevious(fresh: Subscription[], previous: Subscription[
       payment: p.payment,
       displayName: p.edited ? p.displayName : s.displayName,
       category: p.edited ? p.category : s.category,
+      kind: p.edited ? (p.kind ?? s.kind) : s.kind,
+      billType: p.edited ? (p.billType ?? s.billType) : s.billType,
       edited: p.edited,
     };
   });
   // keep user-confirmed subscriptions that no longer appear in the new data
-  for (const p of previous) if (p.status === "confirmed" && !merged.some((m) => m.id === p.id)) merged.push(p);
+  for (const p of previous) if ((p.status === "confirmed" || p.manual) && !merged.some((m) => m.id === p.id)) merged.push(p);
   return merged;
 }

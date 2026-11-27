@@ -10,12 +10,13 @@ import { addPeriod } from "@/lib/detection/engine";
 import { useStore } from "@/lib/db/store";
 import { Missing } from "@/components/empty";
 import { date, daysUntil, FREQ_LABEL, money, relDays } from "@/lib/format";
-import type { Frequency, PaymentTarget, Subscription } from "@/lib/types";
+import type { BillType, Frequency, ObligationKind, PaymentTarget, Subscription } from "@/lib/types";
+import { CATEGORIES, KIND_LABEL } from "@/lib/detection/merchants";
 import { Confidence, StatusTag } from "@/components/bits";
 
 export default function SubscriptionDetail() {
   const { id } = useParams<{ id: string }>();
-  const { state, ready, updateSubscription } = useStore();
+  const { state, ready, updateSubscription, removeSubscription } = useStore();
   const router = useRouter();
   const s = state.subscriptions.find((x) => x.id === decodeURIComponent(id));
   const [editing, setEditing] = useState(false);
@@ -38,7 +39,10 @@ export default function SubscriptionDetail() {
         <div className="px-4 py-10 sm:px-8 lg:border-r lg:rule lg:px-12">
           <div className="mb-4 flex flex-wrap items-center gap-2">
             <StatusTag status={s.status} />
+            <span className="tag">{KIND_LABEL[s.kind ?? "subscription"]}</span>
             <span className="tag">{s.category}</span>
+            {s.billType === "variable" && <span className="tag">Varies</span>}
+            {s.manual && <span className="tag">Added by you</span>}
             {s.international && <span className="tag">Billed in {s.currency}</span>}
           </div>
           <h1 className="display text-[44px] sm:text-[64px]">{s.displayName}</h1>
@@ -55,6 +59,16 @@ export default function SubscriptionDetail() {
               </div>
             ))}
           </div>
+          {s.missed && !s.lapsed && (
+            <p className="mt-4 border-l-2 border-alert bg-alert-wash/50 px-3 py-2 text-[13px] text-ink-2">
+              A payment was expected around {date(s.missed.expected)} but isn&rsquo;t in your statement. It may be overdue, paid another way, or cancelled — check with the provider.
+            </p>
+          )}
+          {s.unusual && (
+            <p className="mt-4 border-l-2 border-amber bg-amber-wash/50 px-3 py-2 text-[13px] text-ink-2">
+              The latest charge ({money(s.unusual.amount, s.currency)} on {date(s.unusual.date)}) is well above the usual {money(s.unusual.typical, s.currency)}.
+            </p>
+          )}
           {s.lapsed && (
             <p className="mt-4 border-l-2 border-amber bg-amber-wash/50 px-3 py-2 text-[13px] text-ink-2">
               No charge since {date(s.lastCharge)} — this looks cancelled, so it&rsquo;s left out of your totals and renewals. Dismiss it if you&rsquo;ve stopped paying.
@@ -71,7 +85,11 @@ export default function SubscriptionDetail() {
             <Link href={`/pay/${encodeURIComponent(s.id)}`} className={s.status === "confirmed" ? "btn btn-primary" : "btn btn-ghost"}>Prepare payment</Link>
             <button className="btn btn-ghost" onClick={() => setEditing((e) => !e)}>{editing ? "Close editor" : "Edit details"}</button>
             {s.status !== "dismissed" ? (
-              <button className="btn btn-ghost text-alert" onClick={() => { updateSubscription(s.id, { status: "dismissed" }); router.push("/"); }}>Not a subscription</button>
+              s.manual ? (
+              <button className="btn btn-ghost text-alert" onClick={() => { removeSubscription(s.id); router.push("/subscriptions"); }}>Delete bill</button>
+            ) : (
+              <button className="btn btn-ghost text-alert" onClick={() => { updateSubscription(s.id, { status: "dismissed" }); router.push("/subscriptions"); }}>Not a recurring bill</button>
+            )
             ) : (
               <button className="btn btn-ghost" onClick={() => updateSubscription(s.id, { status: "detected" })}>Restore</button>
             )}
@@ -131,30 +149,53 @@ export default function SubscriptionDetail() {
 
 function Editor({ s, onSave }: { s: Subscription; onSave(p: Partial<Subscription>): void }) {
   const [name, setName] = useState(s.displayName);
+  const [kind, setKind] = useState<ObligationKind>(s.kind ?? "subscription");
   const [category, setCategory] = useState(s.category);
+  const [billType, setBillType] = useState<BillType>(s.billType ?? "fixed");
   const [amount, setAmount] = useState(String(s.amount));
   const [frequency, setFrequency] = useState<Frequency>(s.frequency);
   const [next, setNext] = useState(s.nextRenewal);
+  const [err, setErr] = useState<string>();
+  const cats = CATEGORIES[kind].includes(category) ? CATEGORIES[kind] : [category, ...CATEGORIES[kind]];
   return (
     <form
       className="mt-8 grid max-w-xl gap-4 border-t rule pt-6 sm:grid-cols-2"
       onSubmit={(e) => {
         e.preventDefault();
-        const amt = Number(amount);
-        if (!Number.isFinite(amt) || amt <= 0) return;
+        const amt = Number(amount.replace(/,/g, ""));
+        if (!name.trim()) return setErr("Name can’t be empty.");
+        if (!Number.isFinite(amt) || amt <= 0) return setErr("Enter an amount above zero.");
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(next)) return setErr("Pick a valid next due date.");
+        setErr(undefined);
         const days = { weekly: 7, monthly: 30, quarterly: 91, yearly: 365 }[frequency];
-        onSave({ displayName: name.trim() || s.displayName, category, amount: amt, frequency, intervalDays: days, nextRenewal: next || addPeriod(s.lastCharge, frequency, days) });
+        onSave({ displayName: name.trim().slice(0, 80), kind, category, billType, amount: amt, typicalAmount: billType === "variable" ? amt : undefined, frequency, intervalDays: days, nextRenewal: next || addPeriod(s.lastCharge, frequency, days), missed: undefined });
       }}
     >
-      <label className="text-[12px] text-muted">Name<input className="field mt-1 text-ink" value={name} onChange={(e) => setName(e.target.value)} /></label>
-      <label className="text-[12px] text-muted">Category<input className="field mt-1 text-ink" value={category} onChange={(e) => setCategory(e.target.value)} /></label>
-      <label className="text-[12px] text-muted">Amount ({s.currency})<input className="field mt-1 text-ink num" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} /></label>
-      <label className="text-[12px] text-muted">Cadence
+      <label className="text-[12px] text-muted sm:col-span-2">Name<input className="field mt-1 text-ink" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} /></label>
+      <label className="text-[12px] text-muted">Type
+        <select className="field mt-1 text-ink" value={kind} onChange={(e) => { const k = e.target.value as ObligationKind; setKind(k); setCategory(CATEGORIES[k][0]); }}>
+          {(Object.keys(KIND_LABEL) as ObligationKind[]).map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}
+        </select>
+      </label>
+      <label className="text-[12px] text-muted">Category
+        <select className="field mt-1 text-ink" value={category} onChange={(e) => setCategory(e.target.value)}>
+          {cats.map((c) => <option key={c}>{c}</option>)}
+        </select>
+      </label>
+      <label className="text-[12px] text-muted">{billType === "variable" ? "Typical amount" : "Amount"} ({s.currency})<input className="field mt-1 text-ink num" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} /></label>
+      <label className="text-[12px] text-muted">Amount is
+        <select className="field mt-1 text-ink" value={billType} onChange={(e) => setBillType(e.target.value as BillType)}>
+          <option value="fixed">The same each time</option>
+          <option value="variable">Varies (usage-based)</option>
+        </select>
+      </label>
+      <label className="text-[12px] text-muted">How often
         <select className="field mt-1 text-ink" value={frequency} onChange={(e) => setFrequency(e.target.value as Frequency)}>
           {Object.entries(FREQ_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
       </label>
-      <label className="text-[12px] text-muted">Next renewal<input type="date" className="field mt-1 text-ink" value={next} onChange={(e) => setNext(e.target.value)} /></label>
+      <label className="text-[12px] text-muted">Next due<input type="date" className="field mt-1 text-ink" value={next} onChange={(e) => setNext(e.target.value)} /></label>
+      {err && <p className="text-[12px] text-alert sm:col-span-2">{err}</p>}
       <div className="flex items-end"><button className="btn btn-primary">Save changes</button></div>
     </form>
   );

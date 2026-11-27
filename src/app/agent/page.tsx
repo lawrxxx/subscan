@@ -10,13 +10,16 @@ interface Trace { name: string; input: Record<string, unknown>; result: unknown;
 interface Turn { role: "user" | "assistant"; content: string; trace?: Trace[]; mode?: "claude" | "local"; error?: boolean }
 
 const PROMPTS = [
-  "Show me all my subscriptions",
-  "How much do I spend monthly?",
-  "Which subscription renews next?",
-  "Prepare my next international subscription payment",
-  "Identify subscriptions I might be wasting money on",
-  "Confirm all high-confidence subscriptions",
-  "What's in my wallet?",
+  "Analyse my statement",
+  "Show me all my monthly bills",
+  "How much do I owe this month?",
+  "What payments are coming up?",
+  "Help me organise my bills before payday",
+  "Which subscriptions can I cancel?",
+  "Identify duplicate payments",
+  "How much could I save by cancelling unused subscriptions?",
+  "Prepare my electricity payment",
+  "Confirm all high-confidence bills",
 ];
 
 const TOOL_LABEL: Record<string, string> = {
@@ -28,12 +31,22 @@ const TOOL_LABEL: Record<string, string> = {
   check_wallet_balance: "Read wallet balance on Celo",
   prepare_payment: "Prepared payment draft",
   transaction_status: "Checked transaction status",
-  propose_subscription_changes: "Proposed subscription changes",
+  propose_subscription_changes: "Proposed changes to your bills",
+  search_transactions: "Searched transactions",
+  spending_breakdown: "Broke down spending",
+  income_and_payday: "Checked income & payday",
+  savings_analysis: "Estimated savings",
 };
 
-// Only what the agent's tools need is sent; raw statement rows stay on device.
+// The agent gets structured data only — never the statement file. Transactions are
+// trimmed to the fields its tools use and the most recent 2,000 rows.
 function snapshot(state: AppState): AppState {
-  return { ...state, transactions: [], subscriptions: state.subscriptions.map((s) => ({ ...s, history: s.history.slice(-12) })) };
+  return {
+    ...state,
+    imports: undefined,
+    transactions: state.transactions.slice(-2000).map((t) => ({ id: t.id, date: t.date, description: t.description, merchant: t.merchant, amount: t.amount, currency: t.currency, direction: t.direction, source: t.source })),
+    subscriptions: state.subscriptions.map((s) => ({ ...s, history: s.history.slice(-12) })),
+  };
 }
 
 export default function Agent() {
@@ -71,6 +84,19 @@ export default function Agent() {
     }
   }
 
+  // Deep links (e.g. "Plan with the agent" on the overview) arrive as ?q=…
+  const asked = useRef(false);
+  useEffect(() => {
+    if (!ready || asked.current || !state.subscriptions.length) return;
+    const q = new URLSearchParams(window.location.search).get("q");
+    if (q) {
+      asked.current = true;
+      window.history.replaceState(null, "", "/agent");
+      void ask(q.slice(0, 300));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, state.subscriptions.length]);
+
   const lastMode = [...turns].reverse().find((t) => t.mode)?.mode;
   const drafts = turns.flatMap((t) => t.trace ?? []).filter((t) => t.name === "prepare_payment" && !(t.result as { error?: string }).error);
   const draft = drafts[drafts.length - 1]?.result as DraftResult | undefined;
@@ -92,8 +118,8 @@ export default function Agent() {
             Agent workspace
             {lastMode && <span className={`tag ${lastMode === "local" ? "border-amber/40 bg-amber-wash text-amber" : ""}`}>{lastMode === "claude" ? "Claude · tool use" : "Local intent mode · no LLM key"}</span>}
           </div>
-          <h1 className="display text-[36px] sm:text-[44px]">Ask about your money.</h1>
-          <p className="mt-2 max-w-xl text-[14px] text-muted">Answers come from tools that read your subscriptions, live Celo balances and Textile FX quotes. The agent can prepare a payment; only you can approve it.</p>
+          <h1 className="display text-[36px] sm:text-[44px]">Ask about your bills.</h1>
+          <p className="mt-2 max-w-xl text-[14px] text-muted">Your agent reads the transactions you imported and the bills found in them. It can explain your spending, plan around payday, tidy your list and prepare payments — you approve anything that changes or moves money.</p>
         </div>
 
         <div className="flex-1 px-4 py-6 sm:px-8 lg:px-12">
@@ -144,7 +170,7 @@ export default function Agent() {
                         p={tr.result as Proposal}
                         applied={!!applied[key]}
                         onApply={() => {
-                          (tr.result as Proposal).changes.forEach((c) => updateSubscription(c.id, { status: c.to }));
+                          (tr.result as Proposal).changes.forEach((c) => updateSubscription(c.id, c.patch ?? { status: c.to as "confirmed" | "dismissed" | "detected" }));
                           setApplied((a) => ({ ...a, [key]: true }));
                         }}
                       />
@@ -216,13 +242,13 @@ function Draft({ d }: { d: DraftResult }) {
 }
 
 interface Proposal {
-  action: "confirm" | "dismiss" | "restore";
-  changes: { id: string; name: string; from: string; to: "confirmed" | "dismissed" | "detected" }[];
+  action: "confirm" | "dismiss" | "restore" | "categorise";
+  changes: { id: string; name: string; from: string; to: string; patch?: Partial<import("@/lib/types").Subscription> }[];
   reason: string | null;
 }
 
 function ProposalCard({ p, applied, onApply }: { p: Proposal; applied: boolean; onApply(): void }) {
-  const verb = p.action === "confirm" ? "Confirm" : p.action === "dismiss" ? "Dismiss" : "Restore";
+  const verb = p.action === "confirm" ? "Confirm" : p.action === "dismiss" ? "Dismiss" : p.action === "categorise" ? "Apply" : "Restore";
   return (
     <div className="mt-4 max-w-xl border border-ink">
       <div className="flex items-center justify-between border-b rule px-4 py-2.5">

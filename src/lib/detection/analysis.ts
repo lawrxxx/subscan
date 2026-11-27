@@ -1,4 +1,5 @@
-import type { Subscription } from "../types.ts";
+import type { ObligationKind, Subscription, Transaction } from "../types.ts";
+import { addPeriod, isoDate } from "./engine.ts";
 import { MONTHLY_FACTOR, toTime } from "./engine.ts";
 
 const DAY = 86_400_000;
@@ -98,7 +99,7 @@ export function duplicates(subs: Subscription[]): DuplicateGroup[] {
   for (const s of list) byMerchant.set(s.merchant, [...(byMerchant.get(s.merchant) ?? []), s]);
   for (const [, g] of byMerchant)
     if (g.length > 1) groups.push({ reason: `${g[0].displayName} is billed ${g.length} times on separate plans`, subscriptions: g });
-  const overlap = ["Streaming", "Music", "Cloud & apps", "TV"];
+  const overlap = ["Streaming", "Music", "Digital services", "TV"];
   for (const cat of overlap) {
     const g = list.filter((s) => s.category === cat);
     const merchants = new Set(g.map((s) => s.merchant));
@@ -144,4 +145,100 @@ export function wasteCandidates(subs: Subscription[], home: string, rates: RateT
     if (s.frequency === "yearly") add(s, "annual plan renews as a single large charge");
   }
   return [...flags.values()].sort((a, b) => (b.monthlyHome ?? 0) - (a.monthlyHome ?? 0));
+}
+
+// ---------------------------------------------------------------------------
+// Commitments, income and savings
+
+export interface Commitments {
+  home: string;
+  monthlyHome: number | null;
+  byKind: Record<ObligationKind, { monthly: number; count: number }>;
+  fixedMonthly: number;
+  variableMonthly: number;
+  unconverted: string[];
+}
+
+/** How much is already committed each month, split by kind and fixed/variable (home currency). */
+export function commitments(subs: Subscription[], home: string, rates: RateTable = {}): Commitments {
+  const byKind: Commitments["byKind"] = { subscription: { monthly: 0, count: 0 }, utility: { monthly: 0, count: 0 }, obligation: { monthly: 0, count: 0 } };
+  let fixed = 0;
+  let variable = 0;
+  const unconverted = new Set<string>();
+  for (const s of live(subs)) {
+    const v = toHome(monthlyEquivalent(s), s.currency, home, rates);
+    if (v === null) {
+      unconverted.add(s.currency);
+      continue;
+    }
+    const k = s.kind ?? "subscription";
+    byKind[k].monthly += v;
+    byKind[k].count++;
+    if ((s.billType ?? "fixed") === "variable") variable += v;
+    else fixed += v;
+  }
+  return { home, monthlyHome: unconverted.size ? null : fixed + variable, byKind, fixedMonthly: fixed, variableMonthly: variable, unconverted: [...unconverted] };
+}
+
+export interface IncomeSource {
+  name: string;
+  typical: number;
+  currency: string;
+  lastDate: string;
+  nextDate: string;
+  count: number;
+}
+
+export interface Income {
+  sources: IncomeSource[];
+  /** Regular monthly income in the home currency (recurring credits only). */
+  monthlyRecurring: number;
+  /** Average monthly money in across the statement, home currency. */
+  averageMonthlyIn: number;
+  nextPayday?: string;
+}
+
+/** Detect regular income (salary, allowances) from credit transactions. */
+export function income(txs: Transaction[], home: string, today = isoDate(Date.now())): Income {
+  const credits = txs.filter((t) => t.direction === "credit" && t.currency === home);
+  const groups = new Map<string, Transaction[]>();
+  for (const t of credits) groups.set(t.merchant, [...(groups.get(t.merchant) ?? []), t]);
+  const sources: IncomeSource[] = [];
+  for (const g of groups.values()) {
+    if (g.length < 2) continue;
+    const sorted = [...g].sort((a, b) => a.date.localeCompare(b.date));
+    const gaps = sorted.slice(1).map((t, i) => (Date.parse(t.date) - Date.parse(sorted[i].date)) / 86_400_000);
+    const regular = gaps.filter((d) => d >= 25 && d <= 36).length / gaps.length;
+    if (regular < 0.6) continue;
+    const amounts = sorted.slice(-4).map((t) => t.amount).sort((a, b) => a - b);
+    const typical = amounts[Math.floor(amounts.length / 2)];
+    const last = sorted[sorted.length - 1];
+    let next = addPeriod(last.date, "monthly", 30);
+    while (next < today) next = addPeriod(next, "monthly", 30);
+    sources.push({ name: g[0].description.slice(0, 40), typical, currency: home, lastDate: last.date, nextDate: next, count: g.length });
+  }
+  const dates = txs.map((t) => t.date).sort();
+  const months = dates.length ? Math.max(1, (Date.parse(dates[dates.length - 1]) - Date.parse(dates[0])) / 86_400_000 / 30.44) : 1;
+  return {
+    sources: sources.sort((a, b) => b.typical - a.typical),
+    monthlyRecurring: sources.reduce((x, s) => x + s.typical, 0),
+    averageMonthlyIn: credits.reduce((x, t) => x + t.amount, 0) / months,
+    nextPayday: sources.map((s) => s.nextDate).sort()[0],
+  };
+}
+
+/** Bills due between today and a date (e.g. the next payday), soonest first, with a running total. */
+export function dueBefore(subs: Subscription[], today: string, until: string) {
+  const list = live(subs)
+    .filter((s) => s.missed || (s.nextRenewal >= today && s.nextRenewal <= until))
+    .sort((a, b) => (a.missed ? -1 : b.missed ? 1 : a.nextRenewal.localeCompare(b.nextRenewal)));
+  return list;
+}
+
+/** Monthly amount that could be saved by acting on waste flags (home currency, flags with a rate). */
+export function savingsPotential(subs: Subscription[], home: string, rates: RateTable, today: string) {
+  // Only things you can actually cut: live subscriptions (not rent, loans or lapsed plans).
+  const cuttable = new Set(live(subs).filter((s) => (s.kind ?? "subscription") === "subscription").map((s) => s.id));
+  const flags = wasteCandidates(subs, home, rates, today).filter((f) => cuttable.has(f.subscriptionId) && (!/annual plan/.test(f.reason) || f.reason.includes(";")));
+  return { flags, monthly: flags.reduce((x, f) => x + (f.monthlyHome ?? 0), 0) };
 }

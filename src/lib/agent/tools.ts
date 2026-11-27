@@ -7,7 +7,8 @@ import { CHAIN, RPC_URL, TOKENS, type TokenSymbol } from "../celo/config.ts";
 function amt(atomic: string, t: TokenSymbol) {
   return `${Number(formatUnits(BigInt(atomic), TOKENS[t].decimals)).toLocaleString("en-US", { maximumFractionDigits: t === "cNGN" ? 2 : 4 })} ${TOKENS[t].display}`;
 }
-import { duplicates, monthlyEquivalent, priceChanges, spendSummary, upcomingRenewals, wasteCandidates, type RateTable } from "../detection/analysis.ts";
+import { commitments, dueBefore, duplicates, income, monthlyEquivalent, priceChanges, savingsPotential, spendSummary, toHome, upcomingRenewals, wasteCandidates, type RateTable } from "../detection/analysis.ts";
+import { classify } from "../detection/merchants.ts";
 import { planPayment } from "../payments/plan.ts";
 import { formatRate, preview } from "../textile/client.ts";
 import type { AppState, Subscription } from "../types.ts";
@@ -31,7 +32,9 @@ function brief(s: Subscription) {
   return {
     id: s.id,
     name: s.displayName,
+    type: s.kind ?? "subscription",
     category: s.category,
+    bill_type: s.billType ?? "fixed",
     amount: s.amount,
     currency: s.currency,
     frequency: s.frequency,
@@ -42,6 +45,10 @@ function brief(s: Subscription) {
     confidence: Math.round(s.confidence * 100) / 100,
     international: s.international,
     price_change: s.priceChange ?? null,
+    expected_payment_missing: s.missed?.expected ?? null,
+    unusual_charge: s.unusual ?? null,
+    lapsed: !!s.lapsed,
+    added_by_user: !!s.manual,
     payment_method: s.payment ? { method: s.payment.method, token: s.payment.token, recipient: s.payment.address ?? s.payment.x402Url } : null,
   };
 }
@@ -52,7 +59,9 @@ function findSub(state: AppState, ref: unknown): Subscription | undefined {
   return (
     state.subscriptions.find((s) => s.id.toLowerCase() === q) ??
     state.subscriptions.find((s) => s.displayName.toLowerCase() === q) ??
-    state.subscriptions.find((s) => s.displayName.toLowerCase().includes(q) || s.merchant.includes(q))
+    state.subscriptions.find((s) => s.displayName.toLowerCase().includes(q) || s.merchant.includes(q)) ??
+    // "electricity", "internet", "rent" … match by category
+    state.subscriptions.find((s) => s.status !== "dismissed" && (s.category.toLowerCase() === q || q.includes(s.category.toLowerCase())))
   );
 }
 
@@ -60,12 +69,13 @@ export const TOOLS: ToolDef[] = [
   {
     name: "list_subscriptions",
     description:
-      "List the user's subscriptions detected from their imported transactions. Use for questions like 'show me all my subscriptions' or to find international (foreign-currency) ones. Dismissed items are excluded unless status='all'.",
+      "List the user's recurring bills: subscriptions, utilities (electricity, internet, mobile, water) and other obligations (rent, insurance, loans), detected from imported statements or added by the user. Filter by type. Dismissed items are excluded unless status='all'.",
     input_schema: {
       type: "object",
       properties: {
         status: { type: "string", enum: ["active", "confirmed", "detected", "all"], description: "Filter. 'active' = not dismissed." },
-        international_only: { type: "boolean", description: "Only subscriptions billed in a currency other than the home currency." },
+        international_only: { type: "boolean", description: "Only bills charged in a currency other than the home currency." },
+        type: { type: "string", enum: ["subscription", "utility", "obligation", "all"] },
         sort: { type: "string", enum: ["renewal", "cost"] },
       },
       required: [],
@@ -77,6 +87,7 @@ export const TOOLS: ToolDef[] = [
         status === "all" ? true : status === "active" ? s.status !== "dismissed" : s.status === status,
       );
       if (input.international_only) list = list.filter((s) => s.international);
+      if (input.type && input.type !== "all") list = list.filter((s) => (s.kind ?? "subscription") === input.type);
       if (input.sort === "cost") list = [...list].sort((a, b) => monthlyEquivalent(b) - monthlyEquivalent(a));
       else list = [...list].sort((a, b) => a.nextRenewal.localeCompare(b.nextRenewal));
       return { home_currency: state.settings.homeCurrency, data_source: state.dataSource ?? "none", count: list.length, subscriptions: list.map(brief) };
@@ -209,11 +220,14 @@ export const TOOLS: ToolDef[] = [
   {
     name: "propose_subscription_changes",
     description:
-      "Propose status changes to the user's subscriptions: confirm (it is a real subscription), dismiss (not a subscription / not wanted in totals) or restore. Use when the user asks to confirm, dismiss, clean up or tidy their list. The changes are shown to the user with an Apply button; they are not applied until the user clicks it. Pass refs='high_confidence' to target every detected item with confidence >= 0.85.",
+      "Propose changes to the user's bills: confirm (it is a real recurring bill), dismiss (not a bill / not wanted in totals), restore, or categorise (set type, category and/or fixed-vs-variable). Use when the user asks to confirm, dismiss, tidy or re-categorise. Changes are shown with an Apply button and are NOT applied until the user clicks it. Pass refs=['high_confidence'] to target every detected item with confidence >= 0.85.",
     input_schema: {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["confirm", "dismiss", "restore"] },
+        action: { type: "string", enum: ["confirm", "dismiss", "restore", "categorise"] },
+        type: { type: "string", enum: ["subscription", "utility", "obligation"], description: "categorise only" },
+        category: { type: "string", description: "categorise only, e.g. Electricity, Internet, Rent, Streaming" },
+        bill_type: { type: "string", enum: ["fixed", "variable"], description: "categorise only" },
         refs: { type: "array", items: { type: "string" }, description: "Subscription ids or names, or ['high_confidence']" },
         reason: { type: "string", description: "One short sentence explaining why" },
       },
@@ -221,8 +235,24 @@ export const TOOLS: ToolDef[] = [
       additionalProperties: false,
     },
     run: async (input, { state }) => {
-      const action = input.action as "confirm" | "dismiss" | "restore";
+      const action = input.action as "confirm" | "dismiss" | "restore" | "categorise";
       const refs = (input.refs as string[]) ?? [];
+      if (action === "categorise") {
+        const patch: Record<string, unknown> = { edited: true };
+        if (input.type) patch.kind = input.type;
+        if (input.category) patch.category = String(input.category).slice(0, 40);
+        if (input.bill_type) patch.billType = input.bill_type;
+        const targets = refs.map((r) => findSub(state, r)).filter((s): s is Subscription => !!s);
+        const label = [input.type, input.category, input.bill_type].filter(Boolean).join(" · ");
+        return {
+          proposal: true,
+          action,
+          changes: targets.map((s) => ({ id: s.id, name: s.displayName, from: `${s.kind ?? "subscription"} · ${s.category} · ${s.billType ?? "fixed"}`, to: label, patch })),
+          reason: input.reason ?? null,
+          not_found: refs.filter((r) => !findSub(state, r)),
+          note: "Not applied yet — the user must click Apply.",
+        };
+      }
       const targets = refs.includes("high_confidence")
         ? state.subscriptions.filter((s) => s.status === "detected" && s.confidence >= 0.85)
         : refs.map((r) => findSub(state, r)).filter((s): s is Subscription => !!s);
@@ -232,6 +262,115 @@ export const TOOLS: ToolDef[] = [
         .map((s) => ({ id: s.id, name: s.displayName, from: s.status, to: status }));
       const unknown = refs.filter((r) => r !== "high_confidence" && !findSub(state, r));
       return { proposal: true, action, changes, reason: input.reason ?? null, not_found: unknown, note: "Not applied yet — the user must click Apply." };
+    },
+  },
+  {
+    name: "search_transactions",
+    description:
+      "Search the user's imported bank/card transactions (date, description, amount, money in/out). Use to answer 'when did I pay X', 'show my transfers to Y', or to check a specific charge. Returns at most 50 rows plus totals.",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Words to find in the description (case-insensitive)" },
+        direction: { type: "string", enum: ["debit", "credit", "any"] },
+        from: { type: "string", description: "yyyy-mm-dd" },
+        to: { type: "string", description: "yyyy-mm-dd" },
+        min_amount: { type: "number" },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+    run: async (input, { state }) => {
+      const q = String(input.query ?? "").toLowerCase().trim();
+      const dir = (input.direction as string) ?? "any";
+      const list = state.transactions.filter(
+        (t) =>
+          (!q || t.description.toLowerCase().includes(q)) &&
+          (dir === "any" || (t.direction ?? "debit") === dir) &&
+          (!input.from || t.date >= String(input.from)) &&
+          (!input.to || t.date <= String(input.to)) &&
+          (!input.min_amount || t.amount >= Number(input.min_amount)),
+      );
+      const out = list.filter((t) => (t.direction ?? "debit") === "debit").reduce((x, t) => x + t.amount, 0);
+      const inn = list.filter((t) => t.direction === "credit").reduce((x, t) => x + t.amount, 0);
+      return {
+        matches: list.length,
+        total_out: Math.round(out * 100) / 100,
+        total_in: Math.round(inn * 100) / 100,
+        transactions: list.slice(-50).reverse().map((t) => ({ date: t.date, description: t.description, amount: t.amount, currency: t.currency, direction: t.direction ?? "debit" })),
+        note: state.transactions.length ? undefined : "No transactions imported.",
+      };
+    },
+  },
+  {
+    name: "spending_breakdown",
+    description:
+      "Where the user's money goes: all money out over the statement period grouped by category and top payees, split into committed (recurring bills) vs everything else. Use for 'where is my money going' or 'analyse my statement'.",
+    input_schema: { type: "object", properties: { months: { type: "integer", minimum: 1, maximum: 24, description: "Look back this many months (default: whole statement)" } }, required: [], additionalProperties: false },
+    run: async (input, { state, today }) => {
+      const home = state.settings.homeCurrency;
+      const since = input.months ? new Date(Date.parse(today) - Number(input.months) * 30.44 * 86_400_000).toISOString().slice(0, 10) : "";
+      const debits = state.transactions.filter((t) => (t.direction ?? "debit") === "debit" && t.currency === home && t.date >= since);
+      const recurring = new Set(state.subscriptions.filter((s) => s.status !== "dismissed").map((s) => s.merchant));
+      const byCat = new Map<string, number>();
+      const byPayee = new Map<string, number>();
+      let committed = 0;
+      for (const t of debits) {
+        const c = classify(t.description);
+        const isBill = recurring.has(t.merchant);
+        if (isBill) committed += t.amount;
+        const cat = isBill ? c.category : c.category === "Other" ? "Everyday spending & transfers" : c.category;
+        byCat.set(cat, (byCat.get(cat) ?? 0) + t.amount);
+        byPayee.set(t.merchant, (byPayee.get(t.merchant) ?? 0) + t.amount);
+      }
+      const total = debits.reduce((x, t) => x + t.amount, 0);
+      const dates = debits.map((t) => t.date).sort();
+      const months = dates.length ? Math.max(1, (Date.parse(dates[dates.length - 1]) - Date.parse(dates[0])) / 86_400_000 / 30.44) : 1;
+      const r = (n: number) => Math.round(n);
+      return {
+        currency: home,
+        period: dates.length ? { from: dates[0], to: dates[dates.length - 1], months: Math.round(months * 10) / 10 } : null,
+        total_out: r(total),
+        monthly_average_out: r(total / months),
+        recurring_bills_share: total ? Math.round((committed / total) * 100) / 100 : 0,
+        by_category: [...byCat.entries()].map(([category, amount]) => ({ category, amount: r(amount), per_month: r(amount / months) })).sort((a, b) => b.amount - a.amount),
+        top_payees: [...byPayee.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([payee, amount]) => ({ payee, amount: r(amount) })),
+      };
+    },
+  },
+  {
+    name: "income_and_payday",
+    description:
+      "Detect the user's regular income (salary etc.) from money-in transactions, the next expected payday, how much of income is already committed to bills, and which bills fall due before payday. Use for 'help me organise my bills before payday' or 'how much is left after bills'.",
+    input_schema: { type: "object", properties: {}, required: [], additionalProperties: false },
+    run: async (_i, { state, rates, today }) => {
+      const home = state.settings.homeCurrency;
+      const inc = income(state.transactions, home, today);
+      const c = commitments(state.subscriptions, home, rates);
+      const before = inc.nextPayday ? dueBefore(state.subscriptions, today, inc.nextPayday) : [];
+      return {
+        currency: home,
+        income_sources: inc.sources,
+        regular_monthly_income: Math.round(inc.monthlyRecurring),
+        average_monthly_money_in: Math.round(inc.averageMonthlyIn),
+        next_payday: inc.nextPayday ?? null,
+        committed_monthly: c.monthlyHome === null ? null : Math.round(c.monthlyHome),
+        committed_share_of_income: inc.monthlyRecurring && c.monthlyHome !== null ? Math.round((c.monthlyHome / inc.monthlyRecurring) * 100) / 100 : null,
+        due_before_payday: before.map((s) => ({ ...brief(s), amount_home: toHome(s.amount, s.currency, home, rates) })),
+        due_before_payday_total: Math.round(before.reduce((x, s) => x + (toHome(s.amount, s.currency, home, rates) ?? 0), 0)),
+        note: inc.sources.length ? undefined : "No regular income detected — the statement may not include salary credits.",
+      };
+    },
+  },
+  {
+    name: "savings_analysis",
+    description:
+      "Estimate how much the user could save per month by acting on cuttable subscriptions: overlapping services, price rises, annual plans. Rent, loans and utilities are not counted as cuttable. These are suggestions — the user decides.",
+    input_schema: { type: "object", properties: {}, required: [], additionalProperties: false },
+    run: async (_i, { state, rates, today }) => {
+      const home = state.settings.homeCurrency;
+      const sp = savingsPotential(state.subscriptions, home, rates, today);
+      return { currency: home, potential_monthly_saving: Math.round(sp.monthly), potential_yearly_saving: Math.round(sp.monthly * 12), suggestions: sp.flags };
     },
   },
   {

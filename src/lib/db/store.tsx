@@ -3,9 +3,11 @@
 // preferences. Persisted through a StorageAdapter (browser localStorage today).
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { detectSubscriptions, mergeWithPrevious } from "../detection/engine";
-import { parseTransactionsCsv } from "../detection/csv";
+import { extractCsv } from "../import/csv";
+import { mergeTransactions, rowsToTransactions } from "../import/normalise";
+import type { ExtractedRow } from "../import/types";
 import { sampleStatementCsv } from "../sample";
-import type { AppSettings, AppState, PaymentRecord, Subscription, Transaction } from "../types";
+import type { AppSettings, AppState, ImportRecord, PaymentRecord, Subscription } from "../types";
 import { browserStorage, type StorageAdapter } from "./storage";
 
 const EMPTY: AppState = {
@@ -18,15 +20,19 @@ const EMPTY: AppState = {
 /** "Lapsed" depends on today's date, so it is recomputed on every load. */
 function withLapsed(subs: Subscription[]): Subscription[] {
   const now = Date.now();
-  return subs.map((s) => ({ ...s, lapsed: (now - Date.parse(`${s.lastCharge}T00:00:00Z`)) / 86_400_000 > s.intervalDays * 2.2 }));
+  return subs.map((s) => ({ ...s, lapsed: !s.manual && (now - Date.parse(`${s.lastCharge}T00:00:00Z`)) / 86_400_000 > s.intervalDays * 2.2 }));
 }
 
 interface Store {
   ready: boolean;
   storage: StorageAdapter["kind"];
   state: AppState;
-  importTransactions(txs: Transaction[], source: "csv" | "sample"): Subscription[];
+  /** Save reviewed rows: de-duplicate against existing data, then re-run detection. */
+  importRows(rows: ExtractedRow[], meta: { fileName: string; format: string; source: "csv" | "pdf" | "sample" }): { record: ImportRecord; subscriptions: Subscription[] };
   loadSample(): Subscription[];
+  removeImport(importId: string): void;
+  addManual(sub: Subscription): void;
+  removeSubscription(id: string): void;
   updateSubscription(id: string, patch: Partial<Subscription>): void;
   updateSettings(patch: Partial<AppSettings>): void;
   upsertPayment(p: PaymentRecord): void;
@@ -65,20 +71,51 @@ export function StoreProvider({ children, adapter = browserStorage }: { children
   );
 
   const store = useMemo<Store>(() => {
-    const importTransactions = (txs: Transaction[], source: "csv" | "sample") => {
+    const redetect = (txs: AppState["transactions"], previous: Subscription[]) => {
       const fresh = detectSubscriptions(txs, { homeCurrency: ref.current.settings.homeCurrency });
-      const merged = mergeWithPrevious(fresh, ref.current.dataSource === source ? ref.current.subscriptions : []);
-      commit((s) => ({ ...s, transactions: txs, subscriptions: merged, importedAt: new Date().toISOString(), dataSource: source }));
-      return merged;
+      return mergeWithPrevious(fresh, previous);
+    };
+    const importRows: Store["importRows"] = (rows, meta) => {
+      const cur = ref.current;
+      const id = `imp_${Date.now().toString(36)}`;
+      const incoming = rowsToTransactions(rows, meta.source, id);
+      // Real data replaces the sample statement rather than mixing with it.
+      const replacing = meta.source === "sample" || cur.dataSource === "sample";
+      const base = replacing ? [] : cur.transactions;
+      const { merged, added, duplicates } = mergeTransactions(base, incoming);
+      const subs = redetect(merged, replacing ? cur.subscriptions.filter((x) => x.manual) : cur.subscriptions);
+      const dates = incoming.map((t) => t.date).sort();
+      const record: ImportRecord = { id, at: new Date().toISOString(), fileName: meta.fileName, format: meta.format, rows: added, duplicates, from: dates[0], to: dates[dates.length - 1] };
+      commit((s) => ({
+        ...s,
+        transactions: merged,
+        subscriptions: subs,
+        importedAt: record.at,
+        dataSource: meta.source,
+        imports: [record, ...(replacing ? [] : (s.imports ?? []))].slice(0, 20),
+      }));
+      return { record, subscriptions: subs };
     };
     return {
       ready,
       storage: adapter.kind,
       state,
-      importTransactions,
+      importRows,
       loadSample() {
-        const { transactions } = parseTransactionsCsv(sampleStatementCsv(), ref.current.settings.homeCurrency, "sample");
-        return importTransactions(transactions, "sample");
+        const r = extractCsv(sampleStatementCsv(), ref.current.settings.homeCurrency);
+        return importRows(r.rows, { fileName: "Sample statement", format: "CSV", source: "sample" }).subscriptions;
+      },
+      removeImport(importId) {
+        const cur = ref.current;
+        const txs = cur.transactions.filter((t) => !t.id.startsWith(`${importId}-`));
+        const subs = redetect(txs, cur.subscriptions);
+        commit((s) => ({ ...s, transactions: txs, subscriptions: subs, imports: (s.imports ?? []).filter((i) => i.id !== importId) }));
+      },
+      removeSubscription(id) {
+        commit((s) => ({ ...s, subscriptions: s.subscriptions.filter((x) => x.id !== id || !x.manual) }));
+      },
+      addManual(sub) {
+        commit((s) => ({ ...s, subscriptions: [...s.subscriptions.filter((x) => x.id !== sub.id), sub] }));
       },
       updateSubscription(id, patch) {
         commit((s) => ({ ...s, subscriptions: s.subscriptions.map((x) => (x.id === id ? { ...x, ...patch } : x)) }));

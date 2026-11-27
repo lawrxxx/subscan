@@ -7,12 +7,17 @@ import type { Subscription } from "@/lib/types";
 import { Ledger } from "@/components/ledger";
 import { NoData } from "@/components/empty";
 import { PageHeader } from "@/components/shell";
+import { AddBill } from "@/components/add-bill";
+import { KIND_LABEL, KIND_PLURAL } from "@/lib/detection/merchants";
+import type { ObligationKind } from "@/lib/types";
 
 type Status = "active" | "review" | "confirmed" | "dismissed";
 type Sort = "renewal" | "cost" | "name" | "confidence";
 
 export default function Subscriptions() {
-  const { state, ready, updateSubscription } = useStore();
+  const { state, ready, updateSubscription, addManual } = useStore();
+  const [kind, setKind] = useState<"all" | ObligationKind>("all");
+  const [adding, setAdding] = useState(false);
   const home = state.settings.homeCurrency;
   const { rates } = useRates(home);
   const [status, setStatus] = useState<Status>("active");
@@ -37,13 +42,14 @@ export default function Subscriptions() {
     const yearlyHome = (s: Subscription) => toHome(monthlyEquivalent(s) * 12, s.currency, home, rates) ?? 0;
     return subs
       .filter((s) => (status === "active" ? s.status !== "dismissed" : status === "review" ? s.status === "detected" : s.status === status))
+      .filter((s) => kind === "all" || (s.kind ?? "subscription") === kind)
       .filter((s) => category === "all" || s.category === category)
       .filter((s) => !intlOnly || s.international)
       .filter((s) => !q || `${s.displayName} ${s.category} ${s.merchant}`.toLowerCase().includes(q.toLowerCase()))
       .sort((a, b) =>
         sort === "cost" ? yearlyHome(b) - yearlyHome(a) : sort === "name" ? a.displayName.localeCompare(b.displayName) : sort === "confidence" ? b.confidence - a.confidence : a.nextRenewal.localeCompare(b.nextRenewal),
       );
-  }, [subs, status, category, intlOnly, q, sort, home, rates]);
+  }, [subs, status, kind, category, intlOnly, q, sort, home, rates]);
 
   const shown = spendSummary(list.filter((s) => s.status !== "dismissed"), home, rates);
 
@@ -55,7 +61,7 @@ export default function Subscriptions() {
   return (
     <div>
       <PageHeader
-        kicker="Subscriptions"
+        kicker="Bills & subscriptions"
         title={<>{counts.active} recurring <span className="italic">payments</span></>}
         aside={
           <div className="text-left md:text-right">
@@ -64,7 +70,7 @@ export default function Subscriptions() {
           </div>
         }
       >
-        Detected from your {state.dataSource === "sample" ? "sample" : "imported"} statement. Confirm the ones that are real, dismiss the rest — the agent and your totals use your decisions.
+        Subscriptions, utility bills and other regular payments found in your {state.dataSource === "sample" ? "sample" : ""} statement. Confirm the real ones, dismiss the rest, or add a bill that isn&rsquo;t in your statement.
       </PageHeader>
 
       {/* Filter bar */}
@@ -111,13 +117,28 @@ export default function Subscriptions() {
       </div>
 
       <div className="px-4 py-6 sm:px-8 lg:px-12">
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex gap-px text-[13px]" role="group" aria-label="Filter by type">
+            {(["all", "subscription", "utility", "obligation"] as const).map((k) => (
+              <button key={k} onClick={() => setKind(k)} className={`border px-3 py-1.5 ${kind === k ? "border-ink bg-ink text-paper" : "rule text-muted hover:text-ink"}`}>
+                {k === "all" ? "All" : `${KIND_PLURAL[k]}`}
+              </button>
+            ))}
+          </div>
+          {!adding && <button className="btn btn-ghost h-9" onClick={() => setAdding(true)}>+ Add a bill</button>}
+        </div>
+        {adding && (
+          <div className="mb-6">
+            <AddBill home={home} onCancel={() => setAdding(false)} onAdd={(sub) => { addManual(sub); setAdding(false); setStatus("active"); }} />
+          </div>
+        )}
         {status === "review" && reviewIds.length > 1 && (
           <div className="mb-5 flex flex-wrap items-center justify-between gap-3 border-l-2 border-accent bg-accent-wash/50 px-4 py-3 text-[13px]">
             <span>{reviewIds.length} detections have 85%+ confidence.</span>
             <button className="btn btn-ghost h-8 bg-paper" onClick={() => reviewIds.forEach((id) => updateSubscription(id, { status: "confirmed" }))}>Confirm all {reviewIds.length}</button>
           </div>
         )}
-        <Ledger list={list} home={home} rates={rates} onStatus={(id, s) => updateSubscription(id, { status: s })} empty={q ? `No subscriptions match “${q}”.` : "Nothing in this view."} />
+        <Ledger list={list} home={home} rates={rates} onStatus={(id, s) => updateSubscription(id, { status: s })} empty={q ? `Nothing matches “${q}”.` : "Nothing in this view."} />
         <p className="mt-4 text-[12px] text-muted">
           {list.length} shown · amounts in billing currency; yearly totals in {home}
           {rates.USD ? ` (USD at ₦${rates.USD.toFixed(2)}, live Textile FX)` : ""}.

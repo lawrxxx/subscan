@@ -3,39 +3,75 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { Wordmark } from "@/components/shell";
-import { parseTransactionsCsv, type ParseResult } from "@/lib/detection/csv";
+import { ReviewTable, reviewTotals } from "@/components/review-table";
 import { useStore } from "@/lib/db/store";
-import { sampleStatementCsv } from "@/lib/sample";
-import type { Subscription } from "@/lib/types";
+import { KIND_LABEL, KIND_PLURAL } from "@/lib/detection/merchants";
 import { money } from "@/lib/format";
+import { extractStatement } from "@/lib/import";
+import { markDuplicates, flagInFileRepeats } from "@/lib/import/normalise";
+import { PdfPasswordError } from "@/lib/import/pdf";
+import type { ColumnMapping, ExtractResult, ExtractedRow } from "@/lib/import/types";
+import type { ImportRecord, Subscription } from "@/lib/types";
 
-export default function Onboarding() {
+type Step =
+  | { kind: "pick" }
+  | { kind: "reading"; file: File }
+  | { kind: "password"; file: File; incorrect: boolean }
+  | { kind: "mapping"; file: File; result: ExtractResult }
+  | { kind: "review"; file: File; result: ExtractResult; rows: ExtractedRow[] }
+  | { kind: "done"; record: ImportRecord; subs: Subscription[] };
+
+const ROLES: { key: keyof ColumnMapping; label: string; required?: boolean }[] = [
+  { key: "date", label: "Date", required: true },
+  { key: "description", label: "Description / narration", required: true },
+  { key: "debit", label: "Money out (debit)" },
+  { key: "credit", label: "Money in (credit)" },
+  { key: "amount", label: "Single amount column" },
+  { key: "type", label: "Type (DR/CR)" },
+  { key: "currency", label: "Currency" },
+];
+
+export default function UploadStatement() {
   const router = useRouter();
-  const { importTransactions, state, updateSettings } = useStore();
-  const [result, setResult] = useState<{ parse: ParseResult; subs: Subscription[]; source: "csv" | "sample"; file?: string } | null>(null);
-  const [drag, setDrag] = useState(false);
-  const input = useRef<HTMLInputElement>(null);
+  const { state, importRows, loadSample, updateSettings } = useStore();
   const home = state.settings.homeCurrency;
+  const [step, setStep] = useState<Step>({ kind: "pick" });
+  const [error, setError] = useState<string>();
+  const [drag, setDrag] = useState(false);
+  const [password, setPassword] = useState("");
+  const [mapping, setMapping] = useState<ColumnMapping>({});
+  const input = useRef<HTMLInputElement>(null);
 
-  function run(text: string, source: "csv" | "sample", file?: string) {
-    const parse = parseTransactionsCsv(text, home, source);
-    const subs = parse.transactions.length ? importTransactions(parse.transactions, source) : [];
-    if (subs.length) updateSettings({ onboarded: true });
-    setResult({ parse, subs, source, file });
+  async function read(file: File, opts: { password?: string; mapping?: ColumnMapping } = {}) {
+    setError(undefined);
+    setStep({ kind: "reading", file });
+    try {
+      const result = await extractStatement(file, { homeCurrency: home, ...opts });
+      if (result.needsMapping) {
+        setMapping(result.mapping ?? {});
+        return setStep({ kind: "mapping", file, result });
+      }
+      if (!result.rows.length) {
+        setError(result.warnings.join(" ") || "No transactions found.");
+        return setStep({ kind: "pick" });
+      }
+      // Mark rows we already have so the same statement can't be imported twice.
+      const rows = flagInFileRepeats(markDuplicates(result.rows, state.dataSource === "sample" ? [] : state.transactions));
+      setStep({ kind: "review", file, result, rows });
+    } catch (e) {
+      if (e instanceof PdfPasswordError) return setStep({ kind: "password", file, incorrect: e.incorrect });
+      setError(e instanceof Error ? e.message : String(e));
+      setStep({ kind: "pick" });
+    } finally {
+      setPassword("");
+    }
   }
 
-  async function onFile(f?: File | null) {
-    if (!f) return;
-    if (f.size > 10 * 1024 * 1024) return setResult({ parse: { transactions: [], skipped: 0, columns: {}, dateFormat: "dmy", warnings: ["File is larger than 10 MB."] }, subs: [], source: "csv", file: f.name });
-    run(await f.text(), "csv", f.name);
-  }
-
-  function downloadSample() {
-    const blob = new Blob([sampleStatementCsv()], { type: "text/csv" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "subscan-sample-statement.csv";
-    a.click();
+  function save() {
+    if (step.kind !== "review") return;
+    const { record, subscriptions } = importRows(step.rows, { fileName: step.file.name, format: step.result.format, source: step.result.format.startsWith("PDF") ? "pdf" : "csv" });
+    updateSettings({ onboarded: true });
+    setStep({ kind: "done", record, subs: subscriptions });
   }
 
   return (
@@ -45,110 +81,165 @@ export default function Onboarding() {
         {state.subscriptions.length > 0 && <Link href="/" className="text-[13px] text-muted link">Back to overview</Link>}
       </div>
 
-      <div className="grid lg:grid-cols-[1.05fr_1fr]">
-        <section className="border-b rule px-4 py-10 sm:px-8 lg:border-b-0 lg:border-r lg:px-12 lg:py-16">
-          <div className="kicker mb-5">Step 1 of 2 · Import</div>
-          <h1 className="display max-w-xl text-[44px] sm:text-[64px]">
-            Every recurring charge, <span className="italic">accounted for.</span>
-          </h1>
-          <p className="mt-6 max-w-md text-[16px] text-ink-2">
-            subscan reads a bank or card statement, finds the payments that repeat, and tells you what they cost you over a year — before the next one lands.
-          </p>
+      {step.kind === "review" ? (
+        <Review step={step} home={home} onChange={(rows) => setStep({ ...step, rows })} onCancel={() => setStep({ kind: "pick" })} onSave={save} />
+      ) : step.kind === "done" ? (
+        <Done record={step.record} subs={step.subs} home={home} onContinue={() => router.push("/")} />
+      ) : (
+        <div className="grid lg:grid-cols-[1.05fr_1fr]">
+          <section className="border-b rule px-4 py-10 sm:px-8 lg:border-b-0 lg:border-r lg:px-12 lg:py-16">
+            <div className="kicker mb-5">Your bills and subscriptions agent</div>
+            <h1 className="display max-w-xl text-[44px] sm:text-[62px]">
+              What is your money <span className="italic">already committed to?</span>
+            </h1>
+            <p className="mt-6 max-w-md text-[16px] text-ink-2">
+              Upload a bank or card statement. subscan finds every subscription, utility bill and regular obligation in it, shows what they cost you, and tells you what&rsquo;s due next.
+            </p>
+            <div className="mt-12 max-w-md border-t rule pt-6">
+              <div className="kicker mb-3">How your statement is handled</div>
+              <ul className="space-y-3 text-[14px] text-ink-2">
+                <li className="grid grid-cols-[20px_1fr]"><span className="num text-faint">i.</span>Your file is read inside this browser. It is never uploaded, and the file itself is not kept.</li>
+                <li className="grid grid-cols-[20px_1fr]"><span className="num text-faint">ii.</span>You review the extracted transactions before anything is saved. Saved data stays on this device.</li>
+                <li className="grid grid-cols-[20px_1fr]"><span className="num text-faint">iii.</span>The agent sees structured transactions (date, description, amount) — never the statement file — and only when you ask it something.</li>
+                <li className="grid grid-cols-[20px_1fr]"><span className="num text-faint">iv.</span>subscan never asks for bank logins or card details. Delete imports any time in Settings.</li>
+              </ul>
+            </div>
+          </section>
 
-          <div className="mt-12 max-w-md border-t rule pt-6">
-            <div className="kicker mb-3">How your data is handled</div>
-            <ul className="space-y-3 text-[14px] text-ink-2">
-              <li className="grid grid-cols-[20px_1fr]"><span className="num text-faint">i.</span>The statement is parsed in this browser and stored only on this device. Raw rows are never uploaded.</li>
-              <li className="grid grid-cols-[20px_1fr]"><span className="num text-faint">ii.</span>When you ask the agent a question, a summary of your detected subscriptions is sent to the server for that request only and is not stored.</li>
-              <li className="grid grid-cols-[20px_1fr]"><span className="num text-faint">iii.</span>Payments are signed in your own wallet. subscan never holds keys or funds.</li>
-              <li className="grid grid-cols-[20px_1fr]"><span className="num text-faint">iv.</span>Clear everything at any time from Settings.</li>
-            </ul>
-          </div>
-        </section>
-
-        <section className="px-4 py-10 sm:px-8 lg:px-12 lg:py-16">
-          {!result ? (
-            <>
-              <label className="kicker mb-2 block" htmlFor="home">Home currency</label>
-              <select id="home" className="field mb-8 max-w-[220px]" value={home} onChange={(e) => updateSettings({ homeCurrency: e.target.value })}>
-                <option value="NGN">Nigerian naira (NGN)</option>
-                <option value="USD">US dollar (USD)</option>
-              </select>
-
-              <div
-                onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
-                onDragLeave={() => setDrag(false)}
-                onDrop={(e) => { e.preventDefault(); setDrag(false); void onFile(e.dataTransfer.files[0]); }}
-                className={`border border-dashed px-6 py-10 transition-colors ${drag ? "border-accent bg-accent-wash" : "border-rule bg-paper-2/50"}`}
+          <section className="px-4 py-10 sm:px-8 lg:px-12 lg:py-16">
+            {step.kind === "password" ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (password) void read(step.file, { password });
+                }}
               >
-                <div className="display text-[28px]">Upload a statement</div>
-                <p className="mt-2 max-w-sm text-[14px] text-muted">
-                  CSV export from your bank or card. We look for a date, a description or narration, and an amount (or debit/credit) column.
-                </p>
-                <div className="mt-6 flex flex-wrap gap-3">
-                  <button className="btn btn-primary" onClick={() => input.current?.click()}>Choose CSV file</button>
-                  <input ref={input} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => void onFile(e.target.files?.[0])} />
+                <div className="kicker mb-3">Protected PDF</div>
+                <h2 className="display text-[30px]">{step.file.name} is password-protected</h2>
+                <p className="mt-2 max-w-sm text-[14px] text-muted">Many banks lock statements with a password (often your date of birth or account number). It&rsquo;s used only here to open the file and is never stored or sent anywhere.</p>
+                <input type="password" autoFocus className="field mt-6 max-w-xs" value={password} onChange={(e) => setPassword(e.target.value)} aria-label="PDF password" />
+                {step.incorrect && <p className="mt-2 text-[13px] text-alert">That password didn&rsquo;t work. Try again.</p>}
+                <div className="mt-4 flex gap-3">
+                  <button className="btn btn-primary" disabled={!password}>Open statement</button>
+                  <button type="button" className="btn btn-ghost" onClick={() => setStep({ kind: "pick" })}>Choose another file</button>
+                </div>
+              </form>
+            ) : step.kind === "mapping" ? (
+              <div>
+                <div className="kicker mb-3">Match columns</div>
+                <h2 className="display text-[30px]">Which column is which?</h2>
+                <p className="mt-2 max-w-md text-[14px] text-muted">{step.result.warnings[0]}</p>
+                <div className="mt-6 grid max-w-lg gap-3">
+                  {ROLES.map((r) => (
+                    <label key={r.key} className="grid grid-cols-[1fr_1.2fr] items-center gap-3 text-[13px]">
+                      <span>{r.label}{r.required && <span className="text-alert"> *</span>}</span>
+                      <select className="field h-9" value={mapping[r.key] ?? ""} onChange={(e) => setMapping((m) => ({ ...m, [r.key]: e.target.value || undefined }))}>
+                        <option value="">—</option>
+                        {step.result.headers?.map((h) => <option key={h}>{h}</option>)}
+                      </select>
+                    </label>
+                  ))}
+                </div>
+                <p className="mt-3 text-[12px] text-muted">Pick either money out / money in columns, or a single amount column (negative = money out, or with a type column).</p>
+                <div className="mt-6 flex gap-3">
+                  <button className="btn btn-primary" disabled={!mapping.date || !mapping.description || !(mapping.amount || mapping.debit || mapping.credit)} onClick={() => void read(step.file, { mapping })}>Read statement</button>
+                  <button className="btn btn-ghost" onClick={() => setStep({ kind: "pick" })}>Cancel</button>
                 </div>
               </div>
+            ) : (
+              <>
+                <div
+                  onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+                  onDragLeave={() => setDrag(false)}
+                  onDrop={(e) => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) void read(f); }}
+                  className={`border border-dashed px-6 py-12 transition-colors ${drag ? "border-accent bg-accent-wash" : "border-rule bg-paper-2/50"}`}
+                >
+                  <div className="kicker mb-2">Step 1 · Upload</div>
+                  <div className="display text-[32px]">{step.kind === "reading" ? `Reading ${step.file.name}…` : "Upload your statement"}</div>
+                  <p className="mt-2 max-w-sm text-[14px] text-muted">PDF statements downloaded from your bank (not scanned photos), or a CSV export. 3–12 months works best.</p>
+                  <div className="mt-6 flex flex-wrap items-center gap-3">
+                    <button className="btn btn-primary" disabled={step.kind === "reading"} onClick={() => input.current?.click()}>{step.kind === "reading" ? "Reading…" : "Choose PDF or CSV"}</button>
+                    <span className="text-[12px] text-muted">or drag it here</span>
+                    <input ref={input} type="file" accept=".pdf,.csv,application/pdf,text/csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void read(f); e.target.value = ""; }} />
+                  </div>
+                  {error && <p role="alert" className="mt-4 max-w-md text-[13px] text-alert">{error}</p>}
+                </div>
+                <div className="mt-6 grid gap-4 sm:grid-cols-2">
+                  <label className="text-[12px] text-muted">Your main currency
+                    <select className="field mt-1 text-ink" value={home} onChange={(e) => updateSettings({ homeCurrency: e.target.value })}>
+                      <option value="NGN">Nigerian naira (NGN)</option>
+                      <option value="USD">US dollar (USD)</option>
+                    </select>
+                  </label>
+                  <div className="text-[12px] text-muted">
+                    No statement handy?
+                    <button className="btn btn-ghost mt-1 w-full" onClick={() => { loadSample(); router.push("/"); }}>Explore with a sample statement</button>
+                  </div>
+                </div>
+                <p className="mt-6 text-[12px] text-muted">Supported: CSV exports from any bank or card, and digital PDF statements with a transactions table (date, description, debit/credit or amount, balance). Scanned images aren&rsquo;t supported yet.</p>
+              </>
+            )}
+          </section>
+        </div>
+      )}
+    </div>
+  );
+}
 
-              <div className="mt-px grid border border-t-0 rule sm:grid-cols-2">
-                <button onClick={() => run(sampleStatementCsv(), "sample")} className="border-b rule px-6 py-5 text-left hover:bg-paper-2 sm:border-b-0 sm:border-r">
-                  <div className="text-[14px] font-medium">Try a sample statement</div>
-                  <div className="mt-1 text-[13px] text-muted">12 months of made-up Lagos spending. Labelled as sample throughout.</div>
-                </button>
-                <div className="px-6 py-5">
-                  <div className="text-[14px] font-medium text-muted">Bank account linking</div>
-                  <div className="mt-1 text-[13px] text-muted">Not part of this release. Export a CSV from your bank app or internet banking and upload it here.</div>
-                </div>
-              </div>
-              <button onClick={downloadSample} className="mt-4 text-[13px] text-muted link">Download the sample as CSV to see the expected format</button>
-            </>
-          ) : (
-            <ImportResult result={result} onDone={() => router.push("/")} onRetry={() => setResult(null)} home={home} />
-          )}
-        </section>
+function Review({ step, home, onChange, onCancel, onSave }: { step: Extract<Step, { kind: "review" }>; home: string; onChange(rows: ExtractedRow[]): void; onCancel(): void; onSave(): void }) {
+  const t = reviewTotals(step.rows, home);
+  const pending = step.rows.filter((r) => r.issues.length && !r.include && !r.duplicateOf).length;
+  return (
+    <div className="pb-28">
+      <div className="border-b rule px-4 py-8 sm:px-8 lg:px-12">
+        <div className="kicker mb-3">Step 2 · Review what we found</div>
+        <h1 className="display text-[38px] sm:text-[48px]">{step.rows.length} transactions in {step.file.name}</h1>
+        <p className="mt-2 text-[14px] text-muted">
+          Read as {step.result.format}. Check dates, descriptions, amounts and whether money went out or in. Nothing is saved until you continue.
+        </p>
+        {step.result.warnings.length > 0 && <ul className="mt-4 space-y-1 text-[13px] text-amber">{step.result.warnings.map((w) => <li key={w}>{w}</li>)}</ul>}
+      </div>
+      <div className="px-4 py-6 sm:px-8 lg:px-12">
+        <ReviewTable rows={step.rows} onChange={onChange} />
+      </div>
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-ink bg-paper/95 px-4 py-3 backdrop-blur sm:px-8 lg:px-12">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="text-[13px]">
+            <span className="num font-medium">{t.count}</span> to save · out <span className="num">{t.out}</span> · in <span className="num">{t.in}</span>
+            {t.from && <span className="text-muted"> · {t.from} → {t.to}</span>}
+            {pending > 0 && <span className="text-amber"> · {pending} flagged rows left out</span>}
+          </div>
+          <div className="flex gap-2">
+            <button className="btn btn-ghost" onClick={onCancel}>Cancel</button>
+            <button className="btn btn-primary" disabled={!t.count} onClick={onSave}>Save &amp; find my bills</button>
+          </div>
+        </div>
       </div>
     </div>
   );
 }
 
-function ImportResult({ result, onDone, onRetry, home }: { result: { parse: ParseResult; subs: Subscription[]; source: string; file?: string }; onDone(): void; onRetry(): void; home: string }) {
-  const { parse, subs } = result;
-  if (!parse.transactions.length)
-    return (
-      <div>
-        <div className="kicker mb-3 text-alert">Import failed</div>
-        <div className="display text-[30px]">We couldn&rsquo;t read that file.</div>
-        <ul className="mt-4 space-y-2 text-[14px] text-ink-2">{parse.warnings.map((w) => <li key={w}>{w}</li>)}</ul>
-        <button className="btn btn-ghost mt-8" onClick={onRetry}>Try another file</button>
-      </div>
-    );
-  const range = [parse.transactions[0]?.date, parse.transactions[parse.transactions.length - 1]?.date].sort();
+function Done({ record, subs, home, onContinue }: { record: ImportRecord; subs: Subscription[]; home: string; onContinue(): void }) {
+  const byKind = (["subscription", "utility", "obligation"] as const).map((k) => ({ k, list: subs.filter((s) => (s.kind ?? "subscription") === k && s.status !== "dismissed") }));
   return (
-    <div>
-      <div className="kicker mb-3">Step 2 of 2 · Review</div>
-      <div className="figure text-[96px] sm:text-[120px]">{subs.length}</div>
-      <div className="display mt-2 text-[28px]">possible subscriptions found</div>
-      <dl className="mt-8 grid grid-cols-2 border-t rule text-[13px]">
-        <div className="border-b rule py-3"><dt className="text-muted">Source</dt><dd className="mt-0.5">{result.source === "sample" ? "Sample statement" : result.file}</dd></div>
-        <div className="border-b rule py-3 pl-4"><dt className="text-muted">Period</dt><dd className="num mt-0.5">{range[0]} → {range[1]}</dd></div>
-        <div className="border-b rule py-3"><dt className="text-muted">Outgoing payments read</dt><dd className="num mt-0.5">{parse.transactions.length}</dd></div>
-        <div className="border-b rule py-3 pl-4"><dt className="text-muted">Skipped (credits, blanks)</dt><dd className="num mt-0.5">{parse.skipped}</dd></div>
-      </dl>
-      <ul className="mt-6 divide-y divide-rule-soft">
-        {subs.slice(0, 6).map((s) => (
-          <li key={s.id} className="flex items-baseline justify-between py-2 text-[14px]">
-            <span>{s.displayName}</span>
-            <span className="num text-muted">{money(s.amount, s.currency)} · {Math.round(s.confidence * 100)}%</span>
-          </li>
+    <div className="mx-auto max-w-3xl px-4 py-14 sm:px-8">
+      <div className="kicker mb-3">Step 3 · Your obligations</div>
+      <div className="figure text-[110px] leading-none">{subs.filter((s) => s.status !== "dismissed").length}</div>
+      <h1 className="display mt-2 text-[34px]">recurring payments found</h1>
+      <p className="mt-2 text-[14px] text-muted">
+        {record.rows} transactions saved{record.duplicates ? `, ${record.duplicates} already imported were skipped` : ""}. Each item stays “detected” until you confirm it.
+      </p>
+      <div className="mt-8 grid gap-px border rule bg-rule sm:grid-cols-3">
+        {byKind.map(({ k, list }) => (
+          <div key={k} className="bg-paper px-4 py-4">
+            <div className="kicker">{KIND_PLURAL[k]}</div>
+            <div className="figure mt-2 text-[40px]">{list.length}</div>
+            <ul className="mt-2 space-y-0.5 text-[12px] text-muted">{list.slice(0, 4).map((s) => <li key={s.id} className="truncate">{s.displayName} · {money(s.amount, s.currency)}</li>)}</ul>
+          </div>
         ))}
-      </ul>
-      {subs.length > 6 && <p className="mt-2 text-[13px] text-muted">and {subs.length - 6} more</p>}
-      <p className="mt-6 text-[13px] text-muted">Detected items stay unconfirmed until you confirm, edit or dismiss them. Home currency: {home}.</p>
-      <div className="mt-8 flex gap-3">
-        <button className="btn btn-primary" onClick={onDone}>Review subscriptions</button>
-        <button className="btn btn-ghost" onClick={onRetry}>Import a different file</button>
       </div>
+      <button className="btn btn-primary mt-8" onClick={onContinue}>See what&rsquo;s committed</button>
+      <span className="ml-3 text-[12px] text-muted">Home currency {home}</span>
     </div>
   );
 }

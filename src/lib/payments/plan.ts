@@ -28,7 +28,7 @@ export function planPayment(sub: Subscription, opts: { sourceToken?: TokenSymbol
   const problems: string[] = [];
   const destinationToken = sub.payment?.token ?? tokenForCurrency(sub.currency);
   if (!destinationToken) problems.push(`No supported Celo stablecoin for ${sub.currency}. Supported: NGN (cNGN), USD (USD₮).`);
-  if (!sub.payment) problems.push("No verified merchant payment method. Add the merchant's Celo receiving address or x402 endpoint first.");
+  if (!sub.payment) problems.push("No verified way to pay this provider here yet. Most utility companies and card-billed services don't accept stablecoin payments — if yours does, add its Celo address or x402 payment link on the bill's page.");
   else if (sub.payment.method === "address" && !sub.payment.address) problems.push("Merchant receiving address missing.");
   else if (sub.payment.method === "x402" && !sub.payment.x402Url) problems.push("x402 endpoint missing.");
   if (sub.status === "dismissed") problems.push("This subscription was dismissed.");

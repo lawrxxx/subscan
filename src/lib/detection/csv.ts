@@ -10,7 +10,7 @@ export interface ParseResult {
   warnings: string[];
 }
 
-const ALIASES = {
+export const ALIASES = {
   date: ["date", "transaction date", "trans date", "posted date", "value date", "booking date", "txn date", "posting date"],
   description: ["description", "narration", "details", "memo", "merchant", "payee", "name", "transaction details", "remarks", "reference"],
   amount: ["amount", "transaction amount", "value", "amt"],
@@ -20,7 +20,7 @@ const ALIASES = {
   type: ["type", "dr/cr", "transaction type", "debit/credit"],
 };
 
-function findColumn(headers: string[], names: string[]): string | undefined {
+export function findColumn(headers: string[], names: string[]): string | undefined {
   const norm = headers.map((h) => h.trim().toLowerCase());
   for (const n of names) {
     const i = norm.indexOf(n);
@@ -65,7 +65,7 @@ function pad(n: number) {
   return String(n).padStart(2, "0");
 }
 
-function detectDateFormat(samples: string[]): ParseResult["dateFormat"] {
+export function detectDateFormat(samples: string[]): ParseResult["dateFormat"] {
   let dmy = false;
   let mdy = false;
   for (const s of samples) {

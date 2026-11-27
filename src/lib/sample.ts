@@ -39,6 +39,10 @@ const RECURRING: Recurring[] = [
   { desc: "NOTION LABS INC", amount: (i) => (i < 3 ? 12 : 10), currency: "USD", monthlyDay: 24, months: 12 },
   { desc: "APPLE.COM/BILL ICLOUD 200GB", amount: 2.99, currency: "USD", monthlyDay: 19, months: 12 },
   { desc: "CANVA PRO ANNUAL", amount: 119.99, currency: "USD", yearly: true, months: 2, startOffsetMonths: 1 },
+  { desc: "SPECTRANET 4G LTE RENEWAL", amount: 18500, currency: "NGN", monthlyDay: 2, months: 12 },
+  { desc: "AXA MANSARD HMO PREMIUM", amount: 12000, currency: "NGN", monthlyDay: 28, months: 12 },
+  { desc: "FAIRMONEY LOAN REPAYMENT", amount: 45000, currency: "NGN", monthlyDay: 15, months: 6 },
+  { desc: "LAWMA WASTE BILL", amount: 2500, currency: "NGN", monthlyDay: 10, months: 12 },
 ];
 
 const NOISE = [
@@ -57,6 +61,13 @@ export function sampleStatementCsv(today = new Date()): string {
   const end = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
   const rows: { date: string; desc: string; debit?: number; credit?: number; currency: string }[] = [];
 
+  // Rent, paid quarterly.
+  for (let q = 0; q < 4; q++) {
+    const d = new Date(end);
+    d.setUTCDate(1);
+    d.setUTCMonth(d.getUTCMonth() - 1 - q * 3);
+    rows.push({ date: iso(d.getTime()), desc: "TRF TO MR ADEYEMI RENT", debit: 250000, currency: "NGN" });
+  }
   for (const r of RECURRING) {
     const periods = r.months ?? 12;
     for (let i = 0; i < periods; i++) {
