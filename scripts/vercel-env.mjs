@@ -218,12 +218,13 @@ async function verify() {
       return null;
     }
   };
-  const [s, a, card] = await Promise.all([get("/api/status"), get("/api/agent"), fetch(base + "/api/erc8004").then((r) => (r.ok ? r.json() : null)).catch(() => null)]);
+  const [s, a, ap, card] = await Promise.all([get("/api/status"), get("/api/agent"), get("/api/autopilot"), fetch(base + "/api/erc8004").then((r) => (r.ok ? r.json() : null)).catch(() => null)]);
   if (!s) fail(`Couldn't reach ${base}/api/status.`);
   const checks = [
     ["Celo mainnet RPC", s.celoRpc?.ok, s.celoRpc?.ok ? `block ${s.celoRpc.block}` : s.celoRpc?.error],
     ["Textile FX", s.textile?.ok, s.textile?.ok ? `live rate, auth: ${s.textile.auth}` : s.textile?.error],
-    ["Agent (GEMINI_API_KEY)", !!a?.available, a?.available ? a.model : "not configured"],
+    ["Agent", a?.engine === "rules", a?.engine === "rules" ? "rule-based, no AI model" : "unreachable"],
+    ["Autopilot (AUTOPILOT_SEAL_KEY)", !!ap?.available, ap?.available ? `ready${ap.conversions ? ", conversions on" : ", conversions need TEXTILE_API_KEY"}` : "not configured"],
     ["Attribution codes", !!s.attribution?.codes?.length, s.attribution?.codes?.join(", ")],
     ["ERC-8004 agent id", !!s.erc8004AgentId, s.erc8004AgentId ? `#${s.erc8004AgentId}` : "ERC8004_AGENT_ID not set (identity can still be registered from the Wallet page)"],
     ["Agent card URL", !!card, card?.services?.[0]?.endpoint ?? card?.url ?? (card ? "served" : "unreachable")],

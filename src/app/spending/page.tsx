@@ -192,7 +192,6 @@ function TxDrawer({ t, bills, source, onClose }: { t: Transaction; bills: Map<st
           ) : (
             !credit && sameMerchant > 0 && <p className="mt-5 text-[13px] text-muted">{sameMerchant} other transaction{sameMerchant === 1 ? "" : "s"} to the same place, but not regular enough to count as a regular payment.</p>
           )}
-          <Link href={`/ask?q=${encodeURIComponent(`Tell me about my payments to ${bill?.displayName ?? txLabel(t)}`)}`} className="btn btn-ghost mt-4 w-full">Ask subscan about this</Link>
         </div>
       </aside>
     </div>

@@ -1,7 +1,7 @@
 // Live Celo mainnet tests for Autopilot (Altana session + Textile FX + subscan's server code).
 // Run from the repo root:  node --experimental-strip-types scripts/autopilot-mainnet-test.ts <dir with keys.json>
 // keys.json holds {"admin": "0x…", "agent": "0x…"}; never commit it. Spends small real amounts on Celo mainnet.
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { createPublicClient, encodeFunctionData, erc20Abi, http, toHex, type Hex } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";

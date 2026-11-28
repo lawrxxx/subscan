@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { GEMINI_MODEL } from "@/lib/agent/run";
 import { ASSIGNED_MATCHES_REPO, ATTRIBUTION_CODES, REPO_CODE } from "@/lib/celo/attribution";
 import { createPublicClient, http } from "viem";
 import { CHAIN, RPC_URL } from "@/lib/celo/config";
@@ -14,7 +13,7 @@ export async function GET() {
     data: {
       celoRpc: block.status === "fulfilled" ? { ok: true, block: block.value.toString() } : { ok: false, error: String(block.reason) },
       textile: fx.status === "fulfilled" ? { ok: true, ngnPerUsd: fx.value.ngnPerUsd, auth: process.env.TEXTILE_API_KEY ? "api-key" : "wallet-proof" } : { ok: false, error: String(fx.reason) },
-      agent: { llm: !!process.env.GEMINI_API_KEY, provider: "gemini", model: GEMINI_MODEL },
+      agent: { engine: "rules", wallet: "altana", autopilot: !!process.env.AUTOPILOT_SEAL_KEY },
       storage: "browser",
       attribution: { app: "subscan", codes: ATTRIBUTION_CODES, assigned: true, repoCode: REPO_CODE, assignedMatchesRepo: ASSIGNED_MATCHES_REPO },
       erc8004AgentId: process.env.ERC8004_AGENT_ID ?? null,

@@ -107,7 +107,7 @@ export default function PaymentDetail() {
       ) : (
         <div className="mt-5 grid grid-cols-2 gap-2 sm:flex">
           <button className="btn btn-ghost" onClick={() => setEditing(true)}>Edit details</button>
-          <Link href={`/ask?q=${encodeURIComponent(`Tell me about my ${label.name} payments. Is it worth keeping?`)}`} className="btn btn-ghost">Ask subscan</Link>
+          <Link href={`/agent#bill-${encodeURIComponent(s.id)}`} className="btn btn-ghost">What the agent will do</Link>
           {s.status === "confirmed" && !s.manual && <button className="btn btn-quiet col-span-2 sm:ml-auto" onClick={() => { setStatus("dismissed"); router.push("/payments"); }}>Not a regular payment</button>}
           {s.manual && <button className="btn btn-quiet col-span-2 text-alert sm:ml-auto" onClick={() => { removeSubscription(s.id); router.push("/payments"); }}>Delete this payment</button>}
         </div>

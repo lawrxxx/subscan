@@ -1,12 +1,14 @@
 # subscan
 
-Subscription intelligence and payment agent on Celo mainnet. Import a statement → detect recurring payments → understand spend → let the agent prepare a payment → approve it in your wallet → settle on chain (Textile FX conversion USD₮ ↔ cNGN, then merchant settlement by direct transfer or x402).
+A rule-based personal bills agent on Celo mainnet. Import a statement → detect regular payments (deterministic) → see what you spend and what is coming up → let the agent pay chosen bills from your own Altana smart agentic wallet, within on-chain limits you grant, converting USD₮ ↔ cNGN on Textile FX when needed. No language model is involved.
+
+Responsibilities: **subscan** (data, detection, scheduling, payment rules) · **Altana** (wallet, session permissions, execution, revocation) · **Textile FX** (stablecoin conversion).
 
 ## Architecture
 
 Three components, no database:
 
-1. **Vercel** — hosts the Next.js app; server functions under `src/app/api/*` proxy Textile FX (keeping its key private), probe x402 endpoints and run the agent.
+1. **Vercel** — hosts the Next.js app; server functions under `src/app/api/*` proxy Textile FX (keeping its key private), run the deterministic agent tools and Autopilot payments (Altana session key, sealed).
 2. **Textile FX** — live quotes and the actual USD₮ ↔ cNGN conversion on Celo.
 3. **Celo mainnet** — wallet connection, ERC-8004 agent identity, merchant settlement, verifiable transaction hashes. Every transaction carries an ERC-8021 attribution tag.
 
@@ -24,7 +26,7 @@ Checks: `npm run typecheck`, `npm test`, `npm run build`.
 
 ## Deploy (Vercel)
 
-Import the repo in Vercel (framework: Next.js, defaults). Manage environment variables with `npm run env:sync` (see below); `GEMINI_API_KEY` is the only required one. Redeploy after changing `NEXT_PUBLIC_*` values.
+Import the repo in Vercel (framework: Next.js, defaults). Manage environment variables with `npm run env:sync` (see below); `AUTOPILOT_SEAL_KEY` is required for Autopilot; `TEXTILE_API_KEY` is recommended. Redeploy after changing `NEXT_PUBLIC_*` values.
 
 ## Environment variables (Vercel CLI)
 
@@ -35,8 +37,8 @@ npx vercel login           # once
 npx vercel link            # once; writes .vercel/ (git-ignored)
 npm run env:status         # configured vs missing per environment; never prints values
 npm run env:sync           # prompts (hidden input) for everything missing, then redeploys and verifies
-npm run env:add -- GEMINI_API_KEY            # add one variable
-npm run env:add -- GEMINI_API_KEY --replace  # overwrite; asks you to type the name to confirm
+npm run env:add -- AUTOPILOT_SEAL_KEY            # add one variable
+npm run env:add -- AUTOPILOT_SEAL_KEY --replace  # overwrite; asks you to type the name to confirm
 npm run env:deploy         # redeploy production
 npm run env:verify         # check the live deployment picked the values up
 ```
@@ -48,7 +50,9 @@ Secrets are stored as Vercel sensitive variables in production and preview, and 
 | Path | What |
 | --- | --- |
 | `src/lib/detection/` | CSV parsing, recurring-payment detection, spend/renewal/duplicate/waste analysis |
-| `src/lib/agent/` | Agent tools (real app data + live chain/FX) and the Claude tool-use loop |
+| `src/lib/agent/` | Rule-based agent: `rules.ts` (decisions per bill), `tools.ts` (deterministic read-only tools) |
+| `src/lib/autopilot/` | Altana wallet, session template, sealed agent key, payment runner |
+| `src/lib/payments/engine.ts` | Payment stages and every autopay check |
 | `src/lib/celo/` | Central Celo config (verified addresses), browser wallet (viem, EIP-1193) |
 | `src/lib/textile/` | Textile FX v2 RFQ client, TakerControl proof signing |
 | `src/lib/merchant/` | x402 probe/pay (official `@x402/*` packages) |

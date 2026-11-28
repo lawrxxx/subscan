@@ -1,45 +1,35 @@
+// subscan's agent API: runs one deterministic tool over the user's own data and
+// returns its result. There is no language model. Read-only tools only; payments
+// go through /api/autopilot, which enforces the user's Altana permissions.
 import { NextResponse } from "next/server";
-import { AgentUnavailable, describeError, GEMINI_MODEL, runGemini, type ChatTurn } from "@/lib/agent/run";
+import { toolByName } from "@/lib/agent/tools";
 import { indicativeUsdNgn } from "@/lib/textile/rate";
 import type { RateTable } from "@/lib/detection/analysis";
 import type { AppState } from "@/lib/types";
 
-export const maxDuration = 120;
+const READ_ONLY = new Set(["spending_analysis", "spending_breakdown", "upcoming_renewals", "find_waste", "savings_analysis", "income_and_payday", "autopilot_check", "check_wallet_balance", "transaction_status", "list_subscriptions", "get_subscription", "search_transactions"]);
 
-/** Lets the UI show an "agent unavailable" state before the user types anything. */
 export async function GET() {
-  return NextResponse.json({ data: { available: !!process.env.GEMINI_API_KEY, model: GEMINI_MODEL } });
+  return NextResponse.json({ data: { engine: "rules", tools: [...READ_ONLY] } });
 }
 
 export async function POST(req: Request) {
-  const body = (await req.json().catch(() => null)) as { messages?: ChatTurn[]; state?: AppState } | null;
-  if (!body?.messages?.length || !body.state) return NextResponse.json({ error: "messages and state required" }, { status: 400 });
-  const history = body.messages
-    .filter((m) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
-    .slice(-20)
-    .map((m) => ({ role: m.role, content: m.content.slice(0, 4000) }));
-  if (history[history.length - 1]?.role !== "user") return NextResponse.json({ error: "last message must be from the user" }, { status: 400 });
-  if (!process.env.GEMINI_API_KEY) {
-    const { error, code } = describeError(new AgentUnavailable());
-    return NextResponse.json({ error, code }, { status: 503 });
-  }
-
-  // The state stays on this server: tools compute over it and only their (redacted) results go to the model.
+  const body = (await req.json().catch(() => null)) as { tool?: string; input?: Record<string, unknown>; state?: AppState } | null;
+  if (!body?.tool || !body.state) return NextResponse.json({ error: "tool and state required" }, { status: 400 });
+  if (!READ_ONLY.has(body.tool)) return NextResponse.json({ error: "unknown or non read-only tool" }, { status: 400 });
+  const tool = toolByName(body.tool)!;
   const rates: RateTable = {};
-  if (body.state.settings.homeCurrency === "NGN") {
+  if (body.state.settings?.homeCurrency === "NGN") {
     try {
-      rates.USD = (await indicativeUsdNgn()).ngnPerUsd;
+      rates.USD = (await indicativeUsdNgn()).ngnPerUsd; // live Textile FX rate, only to total mixed currencies
     } catch {
-      /* rate unavailable: totals stay per-currency */
+      /* totals stay per currency */
     }
   }
-  const ctx = { state: body.state, rates, today: new Date().toISOString().slice(0, 10) };
-
   try {
-    return NextResponse.json({ data: await runGemini(history, ctx) });
+    const result = await tool.run(body.input ?? {}, { state: body.state, rates, today: new Date().toISOString().slice(0, 10) });
+    return NextResponse.json({ data: { tool: body.tool, result } });
   } catch (e) {
-    const { status, error, code } = describeError(e);
-    console.error("agent error", code, e instanceof Error ? e.message : e);
-    return NextResponse.json({ error, code }, { status });
+    return NextResponse.json({ error: e instanceof Error ? e.message : "Tool failed" }, { status: 500 });
   }
 }

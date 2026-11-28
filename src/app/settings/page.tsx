@@ -11,7 +11,7 @@ import { shortHash } from "@/lib/format";
 interface Status {
   celoRpc: { ok: boolean; block?: string; error?: string };
   textile: { ok: boolean; ngnPerUsd?: number; auth?: string; error?: string };
-  agent: { llm: boolean; model: string };
+  agent?: { engine: string; wallet: string; autopilot: boolean };
   attribution?: { app: string; assigned: boolean };
 }
 
@@ -118,7 +118,8 @@ export default function Settings() {
           <ul className="panel mt-2 px-4 text-[13.5px]">
             <Integration name="Celo mainnet (chain 42220)" ok={status?.celoRpc.ok} detail={status ? (status.celoRpc.ok ? `Connected · block ${status.celoRpc.block}` : "Unreachable") : undefined} />
             <Integration name="Textile FX · USD₮ ↔ cNGN" ok={status?.textile.ok} detail={status ? (status.textile.ok ? `Live · 1 USD₮ ≈ ₦${status.textile.ngnPerUsd?.toFixed(2)}` : "Unreachable") : undefined} />
-            <Integration name="Ask subscan (Google Gemini)" ok={status?.agent.llm} detail={status ? (status.agent.llm ? `${status.agent.model}` : "Not configured") : undefined} />
+            <Integration name="Agent" ok detail="Rule-based, runs inside subscan. No AI model." />
+            <Integration name="Altana wallet (Autopilot)" ok={status?.agent?.autopilot} detail={status ? (status.agent?.autopilot ? "Ready" : "AUTOPILOT_SEAL_KEY not set") : undefined} />
             <Integration name="Storage" ok detail="This browser only, no server database" />
             <Integration name="Transaction attribution (ERC-8021)" ok={status ? true : undefined} detail={status ? ATTRIBUTION_CODES.join(", ") : undefined} />
           </ul>

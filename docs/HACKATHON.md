@@ -1,8 +1,15 @@
 # subscan · Celo Agents Open for Business
 
-subscan is a personal bills agent. People upload a bank statement; subscan finds their
-regular payments, shows what's coming up and where they could save, and (with Autopilot)
-pays chosen bills for them from a wallet they control, within limits they set.
+subscan is a **rule-based** personal bills agent (no language model). People upload a bank
+statement; subscan's deterministic rules find their regular payments, schedule what's due and
+decide what to pay. Payments run from the user's own **Altana** smart agentic wallet under a
+session they grant; **Textile FX** converts USD₮ ↔ cNGN when a bill needs it.
+
+| Layer | Responsibility | Code |
+| --- | --- | --- |
+| subscan | statement parsing, recurring detection, scheduling, payment rules, decisions | `lib/import`, `lib/detection`, `lib/agent/rules.ts`, `lib/payments/engine.ts` |
+| Altana | smart agentic wallet, session keys, on-chain permissions, execution, revocation | `lib/autopilot/*` (`@altananetwork/sdk`) |
+| Textile FX | stablecoin conversion (RFQ v2) | `lib/textile/*` |
 
 Tracks entered: **Stablecoin Corridors (Textile FX)** and **Altana Smart Agentic Wallets**.
 
@@ -44,7 +51,8 @@ Key files
 | Autonomous runner (due bills marked Auto) | `src/lib/autopilot/runner.ts` |
 | Textile RFQ v2 client | `src/lib/textile/client.ts` |
 | Manual pay flow | `src/app/pay/[id]/page.tsx`, `src/lib/payments/execute.ts` |
-| Agent tool `autopilot_check` | `src/lib/agent/tools.ts` |
+| Agent rules (decision per bill) | `src/lib/agent/rules.ts` |
+| Agent page (decisions, needs-you, quick answers) | `src/app/agent/page.tsx` |
 
 ## 2. Textile FX status
 
@@ -76,7 +84,6 @@ Key files
 | Name | Need | Notes |
 | --- | --- | --- |
 | `AUTOPILOT_SEAL_KEY` | required for Autopilot | `openssl rand -hex 32`. Server only |
-| `GEMINI_API_KEY` | required for Ask subscan | Server only |
 | `TEXTILE_API_KEY` | recommended | Needed for Autopilot conversions from passkey wallets |
 | `ERC8004_AGENT_ID` | recommended | subscan's own agent id |
 | `NEXT_PUBLIC_APP_URL` | recommended | ERC-8004 agent card |
@@ -129,10 +136,9 @@ Evidence (hashes) is written to the session's evidence file and will be added he
 1. **Test wallet unfunded**: live Altana + combined tests cannot run until it holds ≈ 20 CELO + a few USD₮.
 2. **`AUTOPILOT_SEAL_KEY` not set on Vercel**: the live site shows "Autopilot isn't switched on" until it is.
 3. **`TEXTILE_API_KEY` not set**: Autopilot conversions from passkey wallets need it.
-4. **`GEMINI_API_KEY` not set**: Ask subscan is unavailable on the live site.
-5. **ERC-8004 id for subscan itself** not registered/recorded yet (Autopilot wallets self-register via the SDK).
-6. Altana recipient allowlist is off-chain by design of the permission model (documented).
-7. Autopilot runs when the user opens subscan (browser storage only, no server database); there is no background scheduler.
+4. **ERC-8004 id for subscan itself** not registered/recorded yet (Autopilot wallets self-register via the SDK).
+5. Altana recipient allowlist is off-chain by design of the permission model (documented).
+6. Autopilot runs when the user opens subscan (browser storage only, no server database); there is no background scheduler.
 
 ## 10. Demo script
 
@@ -146,6 +152,6 @@ Evidence (hashes) is written to the session's evidence file and will be added he
 1. Settings → *Autopilot*: read "what it can and can't do".
 2. *Create Autopilot wallet* (Face ID). *Add money* from MiniPay (USD₮ + CELO for setup).
 3. Set limits (e.g. 20 USD₮ / 30,000 cNGN a month), approve the bill's recipient, 30 days; see the setup cost; *Give subscan access* (Face ID). Show the grant on Celoscan.
-4. Mark the bill *Auto*; open Home: Autopilot pays it (converting USD₮→cNGN on Textile in the same transaction) and shows the hash.
+4. Mark the bill *Auto*; open **Agent**: the bill shows *Paying now* with the rule that allowed it; tap *Pay due now* (or open Home): Autopilot pays it (converting USD₮→cNGN on Textile in the same transaction) and shows the hash.
 5. Try a bill to an unapproved recipient → refused, with the reason. Lower the limit → over-limit refused by the wallet.
 6. *Revoke subscan's access* (one transaction) → the next attempt is refused.

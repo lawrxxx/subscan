@@ -10,7 +10,7 @@ const NAV = [
   { href: "/", label: "Home", short: "Home", icon: "home" },
   { href: "/payments", label: "Payments", short: "Payments", icon: "bills" },
   { href: "/spending", label: "Spending", short: "Spending", icon: "spending" },
-  { href: "/ask", label: "Ask subscan", short: "Ask", icon: "chat" },
+  { href: "/agent", label: "Agent", short: "Agent", icon: "agent" },
 ];
 
 function isActive(path: string, href: string) {

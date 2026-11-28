@@ -11,6 +11,7 @@ import { historyDays, spendingSummary } from "@/lib/spending";
 import type { Subscription } from "@/lib/types";
 import { EmptyPanel, Icon, PageBar, Stat, UploadButton } from "@/components/ui";
 import { useAutopilotRunner } from "@/lib/autopilot/runner";
+import { decide, notices } from "@/lib/agent/rules";
 
 const DAY = 86_400_000;
 
@@ -45,6 +46,8 @@ export default function Home() {
 
   if (!ready) return null;
   if (!state.transactions.length && !subs.length) return <FirstRun />;
+  // Only nag about bills the user chose to automate (or set up for wallet payment).
+  const agentNotices = notices(decide(state)).filter((d) => state.subscriptions.find((x) => x.id === d.billId)?.autopay);
 
   const days = historyDays(state);
   const dueTotal = upcoming.reduce((x, u) => x + (toHome(u.s.amount, u.s.currency, home, rates) ?? 0), 0);
@@ -65,6 +68,20 @@ export default function Home() {
             <div className="font-semibold">Autopilot</div>
             <ul className="mt-1 space-y-0.5 text-ink-2">{autoNotes.map((m, i) => <li key={i}>{m}</li>)}</ul>
             <Link href="/autopilot" className="mt-1 inline-block text-[12.5px] text-muted underline">See Autopilot</Link>
+          </section>
+        )}
+        {agentNotices.length > 0 && (
+          <section className="rounded-[6px] border border-amber/30 bg-amber-wash px-4 py-3 text-[13.5px]" aria-label="The agent needs you">
+            <div className="font-semibold">The agent needs you</div>
+            <ul className="mt-1 space-y-1">
+              {agentNotices.slice(0, 3).map((d) => (
+                <li key={d.billId} className="flex flex-wrap items-center justify-between gap-2">
+                  <span><span className="font-medium">{d.name}</span> <span className="text-ink-2">· {d.reasons[0]}</span></span>
+                  {d.action && <Link href={d.action.href} className="text-[12.5px] font-medium text-amber underline">{d.action.label}</Link>}
+                </li>
+              ))}
+            </ul>
+            {agentNotices.length > 3 && <Link href="/agent" className="mt-1 inline-block text-[12.5px] text-muted underline">{agentNotices.length - 3} more</Link>}
           </section>
         )}
         {toCheck.length > 0 && (
@@ -148,7 +165,7 @@ export default function Home() {
             <section className="panel lg:col-span-2">
               <div className="panel-head">
                 <h2 className="panel-title">Possible savings</h2>
-                <Link href={`/ask?q=${encodeURIComponent("Where could I save money?")}`} className="text-[12.5px] text-muted hover:text-ink">Ask subscan →</Link>
+                <Link href="/agent?q=save" className="text-[12.5px] text-muted hover:text-ink">Details →</Link>
               </div>
               <ul className="divide-y divide-[var(--color-rule-soft)]">
                 {savings.flags.slice(0, 3).map((f) => (

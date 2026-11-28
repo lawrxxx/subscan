@@ -1,27 +1,21 @@
 "use client";
-// The autonomous part: find bills the user switched to "Auto" that are due,
-// and ask the server to pay them. Every outcome, paid or refused, becomes a
-// payment record with its stage, so nothing happens silently.
+// The autonomous part. subscan's rules (lib/agent/rules.ts) decide which bills
+// are due and eligible; this asks the server to pay them through Altana, and
+// records every outcome, paid or refused, so nothing happens silently.
 import { useEffect, useRef } from "react";
 import { parseUnits } from "viem";
 import { TOKENS, tokenForCurrency } from "../celo/config";
 import type { useStore } from "../db/store";
 import { idempotencyKey, STAGE_LABEL } from "../payments/engine";
-import type { PaymentRecord, Subscription } from "../types";
+import { addPeriod } from "../detection/engine";
+import { decide } from "../agent/rules";
+import type { PaymentRecord } from "../types";
 import { payNow, type PayResponse } from "./browser";
 
 type Store = ReturnType<typeof useStore>;
-const DAY = 86_400_000;
-
-/** Due within 2 days, or overdue by no more than 7. */
-export function isDue(s: Subscription, now = Date.now()) {
-  if (s.lapsed) return false;
-  const due = Date.parse(`${s.nextRenewal}T00:00:00Z`);
-  return due - now <= 2 * DAY && now - due <= 7 * DAY;
-}
 
 export async function runAutopilotFor(store: Store, billId: string, opts: { force?: boolean } = {}): Promise<string> {
-  const { state, upsertPayment, logAction } = store;
+  const { state, upsertPayment, logAction, updateSubscription } = store;
   const ap = state.autopilot;
   const s = state.subscriptions.find((x) => x.id === billId);
   if (!ap?.sealedPolicy || !s) return "Autopilot isn't set up.";
@@ -71,6 +65,8 @@ export async function runAutopilotFor(store: Store, billId: string, opts: { forc
   };
   upsertPayment(done);
   if (r.ok) {
+    // Track the confirmed payment: the bill's next date moves on one period.
+    updateSubscription(s.id, { lastCharge: new Date().toISOString().slice(0, 10), nextRenewal: addPeriod(dueDate, s.frequency, s.intervalDays), missed: undefined });
     logAction({ kind: "payment-sent", title: `Autopilot paid ${s.displayName}`, detail: `${s.amount.toLocaleString("en-US")} ${TOKENS[token].display}${converted ? " (converted via Textile FX)" : ""}`, href: `/wallet/${rec.id}` });
     return `Paid ${s.displayName}: ${s.amount.toLocaleString("en-US")} ${TOKENS[token].display}. ${STAGE_LABEL.confirmed}.`;
   }
@@ -85,9 +81,9 @@ export function useAutopilotRunner(store: Store, onResult: (msg: string) => void
     const ap = store.state.autopilot;
     if (!store.ready || ran.current || !ap?.enabled || !ap.sealedPolicy || ap.revokedAt) return;
     ran.current = true;
-    const due = store.state.subscriptions.filter((s) => s.autopay && s.status !== "dismissed" && isDue(s));
+    const due = decide(store.state).filter((d) => d.decision === "pay");
     (async () => {
-      for (const s of due) onResult(await runAutopilotFor(store, s.id));
+      for (const d of due) onResult(await runAutopilotFor(store, d.billId));
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store.ready]);
