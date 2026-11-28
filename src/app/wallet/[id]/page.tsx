@@ -115,7 +115,7 @@ export default function Receipt() {
             ))}
           </ol>
           {p.status === "prepared" && (
-            <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-[6px] bg-amber-wash px-4 py-3 text-[13px]">
+            <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-[12px] bg-amber-wash px-4 py-3 text-[13px]">
               <span>Nothing has been signed. Amounts are indicative until a firm quote is taken.</span>
               <Link href={`/pay/${encodeURIComponent(p.subscriptionId)}`} className="btn btn-primary btn-sm">Continue to approval</Link>
             </div>

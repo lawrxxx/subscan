@@ -9,7 +9,7 @@ import { setPendingUpload } from "@/lib/import/pending";
 import { displayLabel, predictedNext, rawDescription } from "@/lib/review";
 import { historyDays, spendingSummary } from "@/lib/spending";
 import type { Subscription } from "@/lib/types";
-import { EmptyPanel, Icon, PageBar, Stat, UploadButton } from "@/components/ui";
+import { Avatar, EmptyPanel, Icon, SectionHead, UploadButton } from "@/components/ui";
 import { useAutopilotRunner } from "@/lib/autopilot/runner";
 import { decide, notices } from "@/lib/agent/rules";
 
@@ -54,30 +54,35 @@ export default function Home() {
   const name = (s: Subscription) => displayLabel(s, rawDescription(s, state.transactions)).name;
   const change = spend && spend.previous ? (spend.total - spend.previous) / spend.previous : null;
 
-  return (
-    <div>
-      <PageBar
-        title="Home"
-        sub={<>{state.imports?.length ?? 0} statement{(state.imports?.length ?? 0) === 1 ? "" : "s"}{spend ? ` · up to ${date(spend.to)}` : ""}</>}
-        actions={<UploadButton label="Add a statement" className="btn btn-ghost hidden sm:inline-flex lg:hidden" />}
-      />
+  const hour = new Date().getHours();
+  const greeting = `good ${hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening"}${state.settings.displayName ? `, ${state.settings.displayName}` : ""}`;
+  const comingCount = upcoming.filter((u) => u.next).length;
 
-      <div className="space-y-4 px-4 sm:px-6 lg:px-8">
+  return (
+    <div className="px-4 pt-3 sm:px-6 lg:px-8 lg:pt-8">
+      <header className="mb-4">
+        <h1 className="title text-[26px] sm:text-[30px]">{greeting}</h1>
+        <p className="mt-1 text-[13.5px] text-muted">
+          here&rsquo;s what&rsquo;s happening with your money{spend ? `, up to ${date(spend.to)}` : ""}.
+        </p>
+      </header>
+
+      <div className="space-y-2.5">
         {autoNotes.length > 0 && (
-          <section className="rounded-[6px] border rule bg-surface px-4 py-3 text-[13.5px]" aria-live="polite">
+          <section className="callout callout-sage block" aria-live="polite">
             <div className="font-semibold">Autopilot</div>
-            <ul className="mt-1 space-y-0.5 text-ink-2">{autoNotes.map((m, i) => <li key={i}>{m}</li>)}</ul>
-            <Link href="/autopilot" className="mt-1 inline-block text-[12.5px] text-muted underline">See Autopilot</Link>
+            <ul className="mt-0.5 space-y-0.5 text-ink-2">{autoNotes.map((m, i) => <li key={i}>{m}</li>)}</ul>
+            <Link href="/autopilot" className="mt-1 inline-block text-[12.5px] font-medium text-accent underline underline-offset-2">see Autopilot</Link>
           </section>
         )}
         {agentNotices.length > 0 && (
-          <section className="rounded-[6px] border border-amber/30 bg-amber-wash px-4 py-3 text-[13.5px]" aria-label="The agent needs you">
-            <div className="font-semibold">The agent needs you</div>
+          <section className="callout callout-amber block" aria-label="subscan needs you">
+            <div className="font-semibold">subscan needs you</div>
             <ul className="mt-1 space-y-1">
               {agentNotices.slice(0, 3).map((d) => (
                 <li key={d.billId} className="flex flex-wrap items-center justify-between gap-2">
                   <span><span className="font-medium">{d.name}</span> <span className="text-ink-2">· {d.reasons[0]}</span></span>
-                  {d.action && <Link href={d.action.href} className="text-[12.5px] font-medium text-amber underline">{d.action.label}</Link>}
+                  {d.action && <Link href={d.action.href} className="text-[12.5px] font-semibold text-amber underline underline-offset-2">{d.action.label}</Link>}
                 </li>
               ))}
             </ul>
@@ -85,75 +90,105 @@ export default function Home() {
           </section>
         )}
         {toCheck.length > 0 && (
-          <Link href="/review" className="flex items-center justify-between gap-3 rounded-[6px] border border-amber/30 bg-amber-wash px-4 py-3 text-[14px] hover:border-amber/60">
-            <span><span className="font-semibold">We found {toCheck.length} payment{toCheck.length === 1 ? "" : "s"} to check.</span> <span className="text-ink-2">Confirm the real ones so your totals are right.</span></span>
-            <span className="shrink-0 font-medium text-amber">Check <span aria-hidden>→</span></span>
+          <Link href="/review" className="callout callout-amber hover:brightness-[0.98]">
+            <span className="flex min-w-0 items-center gap-3">
+              <span className="tile bg-surface text-amber"><Icon name="alert" size={17} /></span>
+              <span className="min-w-0">
+                <span className="block font-semibold">{toCheck.length} payment{toCheck.length === 1 ? "" : "s"} to check</span>
+                <span className="block text-[12.5px] text-ink-2">Confirm the real ones so your totals are right.</span>
+              </span>
+            </span>
+            <Icon name="chev" size={18} className="chev" />
           </Link>
         )}
+      </div>
 
-        <section className="panel grid grid-cols-2 lg:grid-cols-4 [&>*]:border-rule max-lg:[&>*:nth-child(-n+2)]:border-b max-lg:[&>*:nth-child(odd)]:border-r lg:[&>*:not(:last-child)]:border-r">
-          <Stat
-            label="Monthly payments"
-            value={confirmed.length ? money(monthly.monthlyHome ?? 0, home) : "—"}
-            sub={confirmed.length ? `${confirmed.length} confirmed` : toCheck.length ? "None confirmed yet" : "None found"}
-          />
-          <Stat label="Coming up · 30 days" value={upcoming.length ? money(dueTotal, home) : "—"} sub={upcoming.length ? `${upcoming.length} payment${upcoming.length === 1 ? "" : "s"}` : "Nothing expected"} tone={upcoming.some((u) => !u.next) ? "alert" : undefined} />
-          <Stat
-            label="Spent · last 30 days"
-            value={spend ? money(spend.total, home) : "—"}
-            sub={change !== null ? `${change >= 0 ? "Up" : "Down"} ${Math.abs(Math.round(change * 100))}% on the 30 days before` : days < 60 ? "Add more months to compare" : undefined}
-          />
-          <Stat label="Possible savings" value={savings.monthly ? `${money(savings.monthly, home)}/mo` : "—"} sub={savings.flags.length ? `${savings.flags.length} idea${savings.flags.length === 1 ? "" : "s"}` : "Nothing obvious"} tone={savings.monthly ? "accent" : undefined} />
-        </section>
-        {toCheck.length > 0 && confirmed.length > 0 && pendingMonthly.monthlyHome ? (
-          <p className="-mt-2 text-[12.5px] text-muted">Monthly payments only count what you&rsquo;ve confirmed. Another {money(pendingMonthly.monthlyHome, home)} a month is waiting to be checked.</p>
-        ) : null}
+      <div className={`grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-8 ${autoNotes.length || agentNotices.length || toCheck.length ? "mt-4" : ""}`}>
+        <div className="space-y-2.5">
+          <Link href="/payments" className="block rounded-[16px] bg-accent px-5 py-5 text-[#f6f2e9] hover:bg-accent-2">
+            <div className="flex items-center justify-between text-[13px] text-[#f6f2e9]/80"><span>monthly payments</span><Icon name="chev" size={16} /></div>
+            <div className="figure mt-2 text-[34px] sm:text-[38px]">{confirmed.length ? money(monthly.monthlyHome ?? 0, home) : "—"}</div>
+            <div className="mt-1.5 text-[13px] text-[#f6f2e9]/80">
+              {confirmed.length ? `across ${confirmed.length} regular payment${confirmed.length === 1 ? "" : "s"}` : toCheck.length ? "none confirmed yet" : "none found yet"}
+              {toCheck.length > 0 && confirmed.length > 0 && pendingMonthly.monthlyHome ? ` · ${money(pendingMonthly.monthlyHome, home)} more to check` : ""}
+            </div>
+          </Link>
 
-        {!live.length && <NoRecurring spanDays={days} />}
+          <div className="grid grid-cols-2 gap-2.5">
+            <Link href="/payments" className="panel block px-4 py-4 hover:border-line-strong">
+              <Icon name="calendar" size={18} className="text-accent" />
+              <div className="mt-3 text-[12.5px] text-muted">coming up</div>
+              <div className={`figure mt-0.5 text-[24px] ${upcoming.some((u) => !u.next) ? "text-alert" : ""}`}>{upcoming.length}</div>
+              <div className="mt-0.5 truncate text-[12px] text-muted">{upcoming.length ? `${money(dueTotal, home)} · 30 days` : "nothing expected"}</div>
+            </Link>
+            <Link href="/spending" className="panel block px-4 py-4 hover:border-line-strong">
+              <Icon name="spending" size={18} className="text-accent" />
+              <div className="mt-3 text-[12.5px] text-muted">spending</div>
+              <div className="figure mt-0.5 truncate text-[24px]">{spend ? money(spend.total, home) : "—"}</div>
+              <div className="mt-0.5 truncate text-[12px] text-muted">{change !== null ? <><span className={change > 0 ? "text-alert" : "text-positive"}>{change >= 0 ? "up" : "down"} {Math.abs(Math.round(change * 100))}%</span> · 30 days</> : days < 60 ? "last 30 days" : "last 30 days"}</div>
+            </Link>
+          </div>
 
-        <div className="grid gap-4 lg:grid-cols-2">
+          {savings.monthly > 0 && (
+            <Link href="/agent?q=save" className="callout callout-sage hover:brightness-[0.98]">
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="tile bg-surface"><Icon name="leaf" size={17} /></span>
+                <span className="min-w-0">
+                  <span className="block font-semibold">possible savings · <span className="num">{money(savings.monthly, home)}/mo</span></span>
+                  <span className="block truncate text-[12.5px] text-ink-2">{savings.flags.length} idea{savings.flags.length === 1 ? "" : "s"} to look at. Nothing is cancelled for you.</span>
+                </span>
+              </span>
+              <Icon name="chev" size={18} className="chev" />
+            </Link>
+          )}
+
+          {!live.length && <NoRecurring spanDays={days} />}
+        </div>
+
+        <div className="space-y-5">
           {live.length > 0 && (
-            <section className="panel">
-              <div className="panel-head">
-                <h2 className="panel-title">Coming up</h2>
-                <Link href="/payments" className="text-[12.5px] text-muted hover:text-ink">All payments →</Link>
+            <section>
+              <SectionHead title={comingCount || !upcoming.length ? "next payments" : "needs a look"} href="/payments" link="all payments" />
+              <div className="panel">
+                {!upcoming.length ? (
+                  <p className="px-4 py-4 text-[13px] text-muted">Nothing we can predict for the next 30 days. We only show a date when a payment has come in regularly at least three times.</p>
+                ) : (
+                  <ul className="rows">
+                    {upcoming.slice(0, 5).map(({ s, next }) => {
+                      const d = next ? Math.round((Date.parse(next) - Date.parse(today)) / DAY) : null;
+                      return (
+                        <li key={s.id}>
+                          <Link href={`/payments/${encodeURIComponent(s.id)}`} className="row">
+                            <span className="flex min-w-0 items-center gap-3">
+                              <Avatar name={name(s)} size={36} />
+                              <span className="min-w-0">
+                                <span className="row-title">{name(s)}</span>
+                                <span className={`row-sub ${next ? "" : "!text-alert"}`}>{next ? (d === 0 ? "due today" : d === 1 ? "due tomorrow" : `due ${date(next, "day")} · in ${d} days`) : "expected but not in your statement"}{s.status === "detected" ? " · not checked" : ""}</span>
+                              </span>
+                            </span>
+                            <span className="row-amount">{s.billType === "variable" ? "≈ " : ""}{money(s.amount, s.currency)}</span>
+                          </Link>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
               </div>
-              {!upcoming.length ? (
-                <p className="px-4 py-4 text-[13px] text-muted">Nothing we can predict for the next 30 days. We only show a date when a payment has come in regularly at least three times.</p>
-              ) : (
-                <ul className="divide-y divide-[var(--color-rule-soft)]">
-                  {upcoming.slice(0, 6).map(({ s, next }) => {
-                    const d = next ? Math.round((Date.parse(next) - Date.parse(today)) / DAY) : null;
-                    return (
-                      <li key={s.id}>
-                        <Link href={`/payments/${encodeURIComponent(s.id)}`} className="flex items-center justify-between gap-3 px-4 py-2.5 hover:bg-paper-2/50">
-                          <span className="min-w-0">
-                            <span className="block truncate text-[14px] font-medium">{name(s)}</span>
-                            <span className={`text-[12.5px] ${next ? "text-muted" : "text-alert"}`}>{next ? (d === 0 ? "Today" : d === 1 ? "Tomorrow" : `${date(next, "day")} · in ${d} days`) : "Expected but not in your statement"}{s.status === "detected" ? " · not checked yet" : ""}</span>
-                          </span>
-                          <span className="num shrink-0 text-[14px]">{s.billType === "variable" ? "≈ " : ""}{money(s.amount, s.currency)}</span>
-                        </Link>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
             </section>
           )}
 
-          {spend && (
-            <section className="panel">
-              <div className="panel-head">
-                <h2 className="panel-title">Where your money went</h2>
-                <Link href="/spending" className="text-[12.5px] text-muted hover:text-ink">Spending →</Link>
-              </div>
-              <div className="px-4 py-3">
-                <div className="flex items-baseline justify-between text-[13px] text-muted"><span>{date(spend.from, "day")} – {date(spend.to)}</span><span className="num text-ink">{money(spend.total, home)}</span></div>
-                <ul className="mt-2 space-y-2.5">
-                  {spend.categories.slice(0, 4).map((c) => (
-                    <li key={c.name}>
-                      <div className="flex justify-between gap-3 text-[13.5px]"><span>{c.name}</span><span className="num">{money(c.amount, home)}</span></div>
-                      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-paper-2"><div className={`h-full rounded-full ${c.bill ? "bg-accent" : "bg-[#b5ae9f]"}`} style={{ width: `${(c.amount / spend.categories[0].amount) * 100}%` }} /></div>
+          {spend && spend.categories.length > 0 && (
+            <section>
+              <SectionHead title="where your money went" href="/spending" link="spending" />
+              <div className="panel px-4 py-3.5">
+                <div className="flex h-2 overflow-hidden rounded-full bg-paper-2" aria-hidden>
+                  {spend.categories.slice(0, 5).map((c, i) => <span key={c.name} style={{ width: `${(c.amount / spend.total) * 100}%`, background: CAT_TONES[i] }} />)}
+                </div>
+                <ul className="mt-3 space-y-2">
+                  {spend.categories.slice(0, 4).map((c, i) => (
+                    <li key={c.name} className="flex items-center justify-between gap-3 text-[13.5px]">
+                      <span className="flex min-w-0 items-center gap-2"><span className="h-2 w-2 shrink-0 rounded-full" style={{ background: CAT_TONES[i] }} /><span className="truncate">{c.name}</span></span>
+                      <span className="num shrink-0 text-ink-2">{money(c.amount, home)}</span>
                     </li>
                   ))}
                 </ul>
@@ -162,25 +197,23 @@ export default function Home() {
           )}
 
           {savings.flags.length > 0 && (
-            <section className="panel lg:col-span-2">
-              <div className="panel-head">
-                <h2 className="panel-title">Possible savings</h2>
-                <Link href="/agent?q=save" className="text-[12.5px] text-muted hover:text-ink">Details →</Link>
+            <section className="hidden lg:block">
+              <SectionHead title="savings ideas" href="/agent?q=save" link="details" />
+              <div className="panel">
+                <ul className="rows">
+                  {savings.flags.slice(0, 3).map((f) => (
+                    <li key={f.subscriptionId}>
+                      <Link href={`/payments/${encodeURIComponent(f.subscriptionId)}`} className="row">
+                        <span className="min-w-0">
+                          <span className="row-title">{f.name}</span>
+                          <span className="row-sub">{readableDates(f.reason[0].toUpperCase() + f.reason.slice(1))}</span>
+                        </span>
+                        <span className="row-amount text-positive">{money(f.monthlyHome ?? f.monthly, f.monthlyHome !== null ? home : f.currency)}/mo</span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
               </div>
-              <ul className="divide-y divide-[var(--color-rule-soft)]">
-                {savings.flags.slice(0, 3).map((f) => (
-                  <li key={f.subscriptionId}>
-                    <Link href={`/payments/${encodeURIComponent(f.subscriptionId)}`} className="flex items-start justify-between gap-3 px-4 py-2.5 hover:bg-paper-2/50">
-                      <span className="min-w-0">
-                        <span className="block text-[14px] font-medium">{f.name}</span>
-                        <span className="text-[12.5px] text-muted">{readableDates(f.reason[0].toUpperCase() + f.reason.slice(1))}</span>
-                      </span>
-                      <span className="num shrink-0 text-[13.5px] text-accent">{money(f.monthlyHome ?? f.monthly, f.monthlyHome !== null ? home : f.currency)}/mo</span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-              <p className="border-t rule px-4 py-2 text-[12px] text-muted">Ideas only. Nothing is cancelled for you.</p>
             </section>
           )}
         </div>
@@ -188,6 +221,8 @@ export default function Home() {
     </div>
   );
 }
+
+const CAT_TONES = ["#173f32", "#5f8a70", "#d8b98c", "#a9c1a6", "#c9c2b2"];
 
 /** Brand-new user: one clear action, no figures, no filler. */
 function FirstRun() {
@@ -200,42 +235,41 @@ function FirstRun() {
     router.push("/onboarding");
   };
   return (
-    <div className="px-4 py-8 sm:px-6 lg:px-8 lg:py-14">
-      <div className="max-w-[640px]">
-        <h1 className="display text-[30px] sm:text-[34px]">Welcome to subscan.</h1>
-        <p className="mt-2 text-[15px] text-ink-2">Add a bank statement to see what you spend, which payments are coming up and where you could save.</p>
+    <div className="px-4 pt-6 pb-8 sm:px-6 lg:px-8 lg:pt-14">
+      <div className="mx-auto max-w-[560px] lg:mx-0">
+        <h1 className="title text-[28px] sm:text-[32px]">your money, handled.</h1>
+        <p className="mt-2 text-[15px] text-ink-2">Add a bank statement. subscan finds your regular payments, shows where your money goes and what&rsquo;s coming up.</p>
 
         <div
           onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
           onDragLeave={() => setDrag(false)}
           onDrop={(e) => { e.preventDefault(); setDrag(false); pick(e.dataTransfer.files[0]); }}
-          className={`mt-6 flex flex-col gap-3 rounded-[6px] border px-4 py-4 transition-colors sm:flex-row sm:items-center sm:justify-between ${drag ? "border-accent bg-accent-wash" : "border-dashed border-line-strong bg-surface"}`}
+          className={`mt-6 rounded-[16px] px-5 py-6 transition-colors ${drag ? "bg-accent-2 text-[#f6f2e9]" : "bg-accent text-[#f6f2e9]"}`}
         >
-          <div className="min-w-0">
-            <div className="text-[14px] font-medium">{drag ? "Drop it here" : "Add your bank statement"}</div>
-            <div className="text-[12.5px] text-muted">The PDF or CSV file you download from your bank</div>
-          </div>
-          <button className="btn btn-primary w-full shrink-0 sm:w-auto" onClick={() => input.current?.click()}>Choose file</button>
+          <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/12"><Icon name="upload" size={20} /></span>
+          <div className="mt-3 text-[17px] font-semibold">{drag ? "Drop it here" : "Upload your statement"}</div>
+          <div className="mt-0.5 text-[13px] text-[#f6f2e9]/75">The PDF or CSV you download from your bank. Three months or more works best.</div>
+          <button className="btn btn-lg mt-5 w-full bg-[#f6f2e9] text-accent hover:bg-white sm:w-auto" onClick={() => input.current?.click()}>Choose a file</button>
           <input ref={input} type="file" accept=".pdf,.csv,application/pdf,text/csv" className="hidden" aria-label="Statement file" onChange={(e) => pick(e.target.files?.[0])} />
         </div>
 
-        <dl className="mt-8 divide-y divide-[var(--color-rule)] border-y rule text-[13.5px]">
+        <ol className="mt-7 grid grid-cols-1 gap-x-4 gap-y-3 text-[13.5px] sm:grid-cols-2">
           {[
-            ["What you spend", "Your spending sorted into simple groups"],
-            ["Regular payments", "Subscriptions, bills, rent, loans and insurance"],
-            ["What's coming up", "Payments due soon, when we can tell"],
-            ["Ways to save", "Things you might be paying for twice, or that got more expensive"],
-          ].map(([k, v]) => (
-            <div key={k} className="grid grid-cols-[140px_1fr] gap-3 py-2.5 sm:grid-cols-[180px_1fr]">
-              <dt className="font-medium">{k}</dt>
-              <dd className="text-muted">{v}</dd>
-            </div>
+            ["upload", "Upload a statement", "PDF or CSV from your bank"],
+            ["search", "subscan organises it", "Sorts every transaction for you"],
+            ["check", "Check a few items", "Only the ones that are unclear"],
+            ["bolt", "Let subscan handle it", "Pay approved bills within your limits"],
+          ].map(([icon, k, v]) => (
+            <li key={k} className="flex items-center gap-3">
+              <span className="tile"><Icon name={icon} size={17} /></span>
+              <span className="min-w-0"><span className="block font-medium">{k}</span><span className="block text-[12.5px] text-muted">{v}</span></span>
+            </li>
           ))}
-        </dl>
+        </ol>
 
-        <p className="mt-5 flex items-start gap-2 text-[12.5px] text-muted">
+        <p className="mt-7 flex items-start gap-2 text-[12.5px] text-muted">
           <Icon name="lock" size={14} className="mt-0.5 shrink-0" />
-          Your statement stays on this device. You check everything before it’s saved. We never ask for your bank login.
+          Your statement stays on this device. You check everything before it&rsquo;s saved. We never ask for your bank login.
         </p>
       </div>
     </div>

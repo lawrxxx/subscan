@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { EmptyPanel, PageBar, UploadButton } from "@/components/ui";
+import { EmptyPanel, Icon, PageBar, SectionHead, UploadButton } from "@/components/ui";
 import { decide, type AgentDecision, type Decision } from "@/lib/agent/rules";
 import { runAutopilotFor } from "@/lib/autopilot/runner";
 import { TOKENS } from "@/lib/celo/config";
@@ -33,13 +33,13 @@ interface Answer {
   note?: string;
 }
 
-const QUESTIONS: { id: string; label: string }[] = [
-  { id: "monthly", label: "How much do I spend every month?" },
-  { id: "upcoming", label: "What payments are coming up?" },
-  { id: "where", label: "Where does most of my money go?" },
-  { id: "twice", label: "Am I paying for anything twice?" },
-  { id: "save", label: "Where could I save money?" },
-  { id: "autopilot", label: "What will Autopilot pay?" },
+const QUESTIONS: { id: string; label: string; sub: string; icon: string }[] = [
+  { id: "upcoming", label: "check upcoming payments", sub: "see what's due and when", icon: "calendar" },
+  { id: "where", label: "show my spending", sub: "break down where my money goes", icon: "spending" },
+  { id: "twice", label: "find duplicate payments", sub: "spot possible double charges", icon: "copy" },
+  { id: "save", label: "how can i save money?", sub: "simple, practical suggestions", icon: "bolt" },
+  { id: "monthly", label: "what do i spend each month?", sub: "your regular payments in one number", icon: "coins" },
+  { id: "autopilot", label: "what will autopilot pay?", sub: "bills subscan can pay for you", icon: "shield" },
 ];
 
 /** Fixed templates over deterministic tool results. */
@@ -113,7 +113,7 @@ const GROUPS: { title: string; kinds: Decision[] }[] = [
   { title: "Paid", kinds: ["paid"] },
   { title: "You pay these yourself", kinds: ["manual"] },
 ];
-const TONE: Record<Decision, string> = { pay: "text-accent", scheduled: "text-accent", needs_you: "text-amber", blocked: "text-alert", paid: "text-muted", manual: "text-muted", no_date: "text-muted" };
+const TONE: Record<Decision, string> = { pay: "pill-green", scheduled: "pill-green", needs_you: "pill-amber", blocked: "pill-red", paid: "pill-green", manual: "", no_date: "" };
 const WORD: Record<Decision, string> = { pay: "Paying now", scheduled: "Scheduled", needs_you: "Needs you", blocked: "Stopped", paid: "Paid", manual: "Pay yourself", no_date: "No date yet" };
 
 export default function Agent() {
@@ -152,10 +152,10 @@ export default function Agent() {
   if (!state.subscriptions.length && !state.transactions.length)
     return (
       <div>
-        <PageBar title="Agent" sub="subscan's agent checks your bills and pays the ones you allow." />
+        <PageBar title="subscan" sub="take action on your money." />
         <div className="px-4 sm:px-6 lg:px-8">
           <section className="panel">
-            <EmptyPanel icon="agent" title="Add a statement first" action={<UploadButton label="Add a statement" />}>The agent works from your own transactions.</EmptyPanel>
+            <EmptyPanel icon="agent" title="Add a statement first" action={<UploadButton label="Add a statement" />}>subscan works from your own transactions.</EmptyPanel>
           </section>
         </div>
       </div>
@@ -170,111 +170,137 @@ export default function Agent() {
     ...state.payments.filter((p) => p.via === "autopilot" && p.status !== "confirmed").map((p) => ({ id: p.id, at: p.createdAt, title: `Autopilot couldn't pay ${p.merchant}`, detail: p.refusals?.join(" ") ?? p.steps.find((s) => s.error)?.error, href: `/wallet/${p.id}` })),
   ].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 10);
 
-  return (
-    <div className="mx-auto max-w-3xl">
-      <PageBar title="Agent" sub="subscan's rule-based agent: it checks your regular payments each time you open the app and only pays within the access you granted." />
-      <div className="space-y-4 px-4 pb-10 sm:px-6 lg:px-8">
-        <section className="panel flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-          <div className="text-[13.5px]">
-            <div className="font-medium">Autopilot is {access}</div>
-            <div className="text-[12.5px] text-muted">{ap?.expiry && access !== "not set up" ? `Access until ${date(new Date(ap.expiry * 1000).toISOString().slice(0, 10))} · ` : ""}Wallet and permissions by Altana · conversions by Textile FX</div>
-          </div>
-          <div className="flex gap-2">
-            {due.length > 0 && access === "on" && (
-              <button className="btn btn-primary" disabled={running} onClick={async () => { setRunning(true); setRunNotes([]); for (const d of due) { const msg = await runAutopilotFor(store, d.billId); setRunNotes((n) => [...n, msg]); } setRunning(false); }}>
-                {running ? "Paying…" : `Pay ${due.length} due now`}
-              </button>
-            )}
-            <Link href="/autopilot" className="btn btn-ghost">{access === "not set up" ? "Set up Autopilot" : "Autopilot settings"}</Link>
-          </div>
-          {runNotes.length > 0 && <ul className="w-full space-y-0.5 border-t rule pt-2 text-[13px] text-ink-2" aria-live="polite">{runNotes.map((n, i) => <li key={i}>{n}</li>)}</ul>}
-        </section>
-
-        {drafts.length > 0 && (
-          <section className="panel">
-            <div className="panel-head"><h2 className="panel-title">Waiting for your approval</h2></div>
-            <ul className="divide-y divide-[var(--color-rule-soft)]">
-              {drafts.map((p) => (
-                <li key={p.id} className="flex items-center justify-between gap-3 px-4 py-2.5 text-[13.5px]">
-                  <span className="min-w-0 truncate">Pay {p.merchant} · <span className="num">{p.destinationAmount} {TOKENS[p.destinationToken].display}</span></span>
-                  <span className="flex shrink-0 gap-1.5">
-                    <Link href={`/pay/${encodeURIComponent(p.subscriptionId)}`} className="btn btn-primary btn-sm">Review</Link>
-                    <button className="btn btn-quiet btn-sm" onClick={() => removePayment(p.id)}>Remove</button>
-                  </span>
-                </li>
-              ))}
+  const answerPanel = open && (
+    <div className="border-t rule px-4 py-3.5" aria-live="polite">
+      {loading ? (
+        <p className="text-[13px] text-muted">Working it out from your transactions…</p>
+      ) : ansErr ? (
+        <p className="text-[13px] text-alert">{ansErr}</p>
+      ) : ans ? (
+        <>
+          <h3 className="text-[14.5px] font-semibold">{ans.title}</h3>
+          <p className="mt-0.5 text-[13.5px] text-ink-2">{ans.summary}</p>
+          {ans.rows.length > 0 && (
+            <ul className="mt-2 divide-y divide-[var(--color-rule-soft)] border-y rule-soft">
+              {ans.rows.map((r, i) => {
+                const body = (
+                  <>
+                    <span className="min-w-0"><span className="block truncate text-[13.5px]">{r.label}</span>{r.sub && <span className="block text-[12px] text-muted">{r.sub}</span>}</span>
+                    <span className="num shrink-0 text-[13.5px]">{r.value}</span>
+                  </>
+                );
+                return <li key={i}>{r.href ? <Link href={r.href} className="flex items-center justify-between gap-3 py-2 hover:bg-paper-2/50">{body}</Link> : <div className="flex items-center justify-between gap-3 py-2">{body}</div>}</li>;
+              })}
             </ul>
-          </section>
-        )}
-
-        {GROUPS.map((g) => {
-          const items = decisions.filter((d) => g.kinds.includes(d.decision));
-          if (!items.length) return null;
-          return (
-            <section key={g.title} className="panel" aria-label={g.title}>
-              <div className="panel-head"><h2 className="panel-title">{g.title}</h2><span className="text-[12.5px] text-muted">{items.length}</span></div>
-              <ul className="divide-y divide-[var(--color-rule-soft)]">
-                {items.map((d) => <DecisionRow key={d.billId} d={d} />)}
-              </ul>
-            </section>
-          );
-        })}
-        {decisions.some((d) => d.decision === "no_date") && <p className="text-[12.5px] text-muted">{decisions.filter((d) => d.decision === "no_date").length} confirmed payment(s) don&rsquo;t have enough history yet to schedule.</p>}
-        {!decisions.length && <p className="rounded-[6px] bg-paper-2 px-3 py-2.5 text-[13.5px]">No confirmed regular payments yet. <Link href="/review" className="link">Check your payments</Link> so the agent knows what to look after.</p>}
-
-        <section className="panel">
-          <div className="panel-head"><h2 className="panel-title">Quick answers</h2></div>
-          <div className="flex flex-col gap-1.5 px-4 py-3 sm:flex-row sm:flex-wrap">
-            {QUESTIONS.map((q) => (
-              <button key={q.id} onClick={() => ask(q.id)} aria-pressed={open === q.id} className={`rounded-[6px] border px-3 py-2.5 text-left text-[13.5px] sm:rounded-full sm:py-1.5 sm:text-[13px] ${open === q.id ? "border-accent bg-accent-wash" : "rule bg-surface hover:border-line-strong"}`}>{q.label}</button>
-            ))}
-          </div>
-          {open && (
-            <div className="border-t rule px-4 py-3" aria-live="polite">
-              {loading ? (
-                <p className="text-[13px] text-muted">Working it out from your transactions…</p>
-              ) : ansErr ? (
-                <p className="text-[13px] text-alert">{ansErr}</p>
-              ) : ans ? (
-                <>
-                  <h3 className="text-[14.5px] font-semibold">{ans.title}</h3>
-                  <p className="mt-0.5 text-[13.5px] text-ink-2">{ans.summary}</p>
-                  {ans.rows.length > 0 && (
-                    <ul className="mt-2 divide-y divide-[var(--color-rule-soft)] border-y rule-soft">
-                      {ans.rows.map((r, i) => {
-                        const body = (
-                          <>
-                            <span className="min-w-0"><span className="block truncate text-[13.5px]">{r.label}</span>{r.sub && <span className="block text-[12px] text-muted">{r.sub}</span>}</span>
-                            <span className="num shrink-0 text-[13.5px]">{r.value}</span>
-                          </>
-                        );
-                        return <li key={i}>{r.href ? <Link href={r.href} className="flex items-center justify-between gap-3 py-2 hover:bg-paper-2/50">{body}</Link> : <div className="flex items-center justify-between gap-3 py-2">{body}</div>}</li>;
-                      })}
-                    </ul>
-                  )}
-                  {ans.note && <p className="mt-2 text-[12px] text-muted">{ans.note}</p>}
-                </>
-              ) : null}
-            </div>
           )}
-        </section>
+          {ans.note && <p className="mt-2 text-[12px] text-muted">{ans.note}</p>}
+        </>
+      ) : null}
+    </div>
+  );
+  const canPay = due.length > 0 && access === "on";
 
-        {activity.length > 0 && (
-          <section className="panel">
-            <div className="panel-head"><h2 className="panel-title">Recent agent activity</h2></div>
-            <ul className="divide-y divide-[var(--color-rule-soft)]">
-              {activity.map((a) => (
-                <li key={a.id} className="px-4 py-2.5 text-[13.5px]">
-                  {a.href ? <Link href={a.href} className="font-medium hover:underline">{a.title}</Link> : <span className="font-medium">{a.title}</span>}
-                  <div className="text-[12px] text-muted">{a.detail ? `${a.detail} · ` : ""}{new Date(a.at).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</div>
+  return (
+    <div>
+      <PageBar title="subscan" sub="take action on your money." />
+      <div className="grid gap-6 px-4 pb-10 sm:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-8 lg:px-8">
+        <div className="space-y-4">
+          <section className="panel" aria-label="Suggested actions">
+            <ul className="rows">
+              {QUESTIONS.map((q) => (
+                <li key={q.id}>
+                  <button className="row" onClick={() => (open === q.id ? setOpen(null) : ask(q.id))} aria-pressed={open === q.id} aria-expanded={open === q.id}>
+                    <span className="flex min-w-0 items-center gap-3">
+                      <span className={`tile ${open === q.id ? "bg-sage" : ""}`}><Icon name={q.icon} size={18} /></span>
+                      <span className="min-w-0"><span className="row-title">{q.label}</span><span className="row-sub">{q.sub}</span></span>
+                    </span>
+                    <Icon name="chev" size={17} className={`chev transition-transform ${open === q.id ? "rotate-90" : ""}`} />
+                  </button>
+                  {open === q.id && answerPanel}
                 </li>
               ))}
             </ul>
           </section>
-        )}
-        {state.payments.some((p) => p.via === "autopilot") && (
-          <p className="text-[12.5px] text-muted">Every Autopilot payment, paid or refused, is in <Link href="/wallet" className="link">Settings → Wallet</Link> with its transaction hash.</p>
-        )}
+
+          <section className="rounded-[16px] bg-accent px-4 py-4 text-[#f6f2e9]">
+            <div className="flex items-center gap-3">
+              <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/12"><Icon name={canPay ? "bolt" : "play"} size={18} /></span>
+              <div className="min-w-0 flex-1">
+                <div className="text-[14.5px] font-semibold">Autopilot is {access}</div>
+                <div className="truncate text-[12.5px] text-[#f6f2e9]/75">{ap?.expiry && access !== "not set up" ? `access until ${date(new Date(ap.expiry * 1000).toISOString().slice(0, 10))}` : "pays approved bills within limits you set"}</div>
+              </div>
+            </div>
+            <div className="mt-3.5 flex flex-wrap gap-2">
+              {canPay ? (
+                <button className="btn flex-1 bg-[#f6f2e9] text-accent hover:bg-white" disabled={running} onClick={async () => { setRunning(true); setRunNotes([]); for (const d of due) { const msg = await runAutopilotFor(store, d.billId); setRunNotes((n) => [...n, msg]); } setRunning(false); }}>
+                  {running ? "Paying…" : `pay ${due.length} due now`}
+                </button>
+              ) : (
+                <button className="btn flex-1 bg-[#f6f2e9] text-accent hover:bg-white" onClick={() => ask("autopilot")}>run a money check</button>
+              )}
+              <Link href="/autopilot" className="btn flex-1 border border-white/25 text-[#f6f2e9] hover:bg-white/10">{access === "not set up" ? "set up autopilot" : "autopilot settings"}</Link>
+            </div>
+            {runNotes.length > 0 && <ul className="mt-3 space-y-0.5 border-t border-white/20 pt-2 text-[13px] text-[#f6f2e9]/90" aria-live="polite">{runNotes.map((n, i) => <li key={i}>{n}</li>)}</ul>}
+          </section>
+        </div>
+
+        <div className="space-y-5">
+          {drafts.length > 0 && (
+            <section>
+              <SectionHead title="waiting for your approval" />
+              <div className="panel">
+                <ul className="rows">
+                  {drafts.map((p) => (
+                    <li key={p.id} className="flex items-center justify-between gap-3 px-4 py-2.5 text-[13.5px]">
+                      <span className="min-w-0 truncate">Pay {p.merchant} · <span className="num">{p.destinationAmount} {TOKENS[p.destinationToken].display}</span></span>
+                      <span className="flex shrink-0 gap-1.5">
+                        <Link href={`/pay/${encodeURIComponent(p.subscriptionId)}`} className="btn btn-primary btn-sm">Review</Link>
+                        <button className="btn btn-quiet btn-sm" onClick={() => removePayment(p.id)}>Remove</button>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </section>
+          )}
+
+          {GROUPS.map((g) => {
+            const items = decisions.filter((d) => g.kinds.includes(d.decision));
+            if (!items.length) return null;
+            return (
+              <section key={g.title} aria-label={g.title}>
+                <SectionHead title={<>{g.title.toLowerCase()} <span className="num font-normal text-muted">· {items.length}</span></>} />
+                {g.kinds.includes("manual") && <p className="-mt-1 mb-2 px-1 text-[12.5px] text-muted">No wallet address for these providers yet, so you pay them yourself.</p>}
+                <div className="panel">
+                  <ul className="rows">
+                    {items.map((d) => <DecisionRow key={d.billId} d={d} />)}
+                  </ul>
+                </div>
+              </section>
+            );
+          })}
+          {decisions.some((d) => d.decision === "no_date") && <p className="px-1 text-[12.5px] text-muted">{decisions.filter((d) => d.decision === "no_date").length} confirmed payment(s) don&rsquo;t have enough history yet to schedule.</p>}
+          {!decisions.length && <p className="callout callout-amber block">No confirmed regular payments yet. <Link href="/review" className="font-medium underline underline-offset-2">Check your payments</Link> so subscan knows what to look after.</p>}
+
+          {activity.length > 0 && (
+            <section>
+              <SectionHead title="recent activity" />
+              <div className="panel">
+                <ul className="rows">
+                  {activity.map((a) => (
+                    <li key={a.id} className="px-4 py-2.5 text-[13.5px]">
+                      {a.href ? <Link href={a.href} className="font-medium hover:underline">{a.title}</Link> : <span className="font-medium">{a.title}</span>}
+                      <div className="text-[12px] text-muted">{a.detail ? `${a.detail} · ` : ""}{new Date(a.at).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </section>
+          )}
+          {state.payments.some((p) => p.via === "autopilot") && (
+            <p className="px-1 text-[12.5px] text-muted">Every Autopilot payment, paid or refused, is in <Link href="/wallet" className="link">Settings → Wallet</Link> with its transaction link.</p>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -288,13 +314,19 @@ function DecisionRow({ d }: { d: AgentDecision }) {
           <span className="block truncate text-[14px] font-medium hover:underline">{d.name}</span>
           <span className="block text-[12.5px] text-muted">{d.dueDate ? `${date(d.dueDate)}${d.daysUntil !== undefined ? ` · ${d.daysUntil < 0 ? `${-d.daysUntil} days late` : d.daysUntil === 0 ? "today" : `in ${d.daysUntil} days`}` : ""}` : "No date yet"}</span>
         </Link>
-        <span className="shrink-0 text-right">
-          <span className="num block text-[14px]">{money(d.amount, d.currency)}</span>
-          <span className={`block text-[12px] font-medium ${TONE[d.decision]}`}>{WORD[d.decision]}</span>
+        <span className="flex shrink-0 flex-col items-end">
+          <span className="num block text-[14px] font-medium">{money(d.amount, d.currency)}</span>
+          <span className={`pill mt-1 ${TONE[d.decision]}`}>{WORD[d.decision]}</span>
         </span>
       </div>
-      <ul className="mt-1 space-y-0.5 text-[12.5px] text-ink-2">{d.reasons.map((r) => <li key={r}>{r}</li>)}</ul>
-      {d.action && <Link href={d.action.href} className="btn btn-ghost btn-sm mt-2">{d.action.label}</Link>}
+      {d.decision === "manual" ? (
+        d.action && <Link href={d.action.href} className="mt-1 inline-block text-[12.5px] font-medium text-accent underline underline-offset-2">{d.action.label.toLowerCase()}</Link>
+      ) : (
+        <>
+          <ul className="mt-1 space-y-0.5 text-[12.5px] text-ink-2">{d.reasons.map((r) => <li key={r}>{r}</li>)}</ul>
+          {d.action && <Link href={d.action.href} className="btn btn-ghost btn-sm mt-2.5">{d.action.label}</Link>}
+        </>
+      )}
     </li>
   );
 }

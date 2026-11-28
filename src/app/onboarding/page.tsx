@@ -115,7 +115,7 @@ export default function UploadStatement() {
 
   return (
     <div className="min-h-dvh">
-      <header className="sticky top-0 z-20 flex items-center justify-between gap-4 border-b rule bg-paper/95 px-4 py-3 backdrop-blur sm:px-6 lg:px-8">
+      <header className="sticky top-0 z-20 flex h-14 items-center justify-between gap-4 border-b rule bg-paper/95 px-4 backdrop-blur sm:px-6 lg:px-8">
         <Wordmark className="text-[20px]" />
         <Progress at={at} />
         <Link href="/" className="btn btn-quiet btn-sm" aria-label="Close upload"><Icon name="close" size={16} /><span className="hidden sm:inline">Close</span></Link>
@@ -128,7 +128,7 @@ export default function UploadStatement() {
       ) : (
         <div className="mx-auto max-w-[640px] space-y-5 px-4 py-8 sm:px-6 lg:py-12">
           <section>
-            <h1 className="title text-[22px] sm:text-[24px]">Add your bank statement</h1>
+            <h1 className="title text-[24px] sm:text-[26px]">upload your statement</h1>
             <p className="mt-1 text-[14px] text-ink-2">We&rsquo;ll sort your transactions for you and only ask about anything that&rsquo;s unclear. Nothing is saved until you say so.</p>
 
             <div className="panel mt-5">
@@ -176,13 +176,14 @@ export default function UploadStatement() {
                   onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
                   onDragLeave={() => setDrag(false)}
                   onDrop={(e) => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) void read(f); }}
-                  className={`m-2 flex flex-col items-center rounded-[4px] border border-dashed px-5 py-8 text-center transition-colors ${drag ? "border-accent bg-accent-wash" : "border-line-strong bg-paper-2/40"}`}
+                  className={`m-2 flex flex-col items-center rounded-[12px] border border-dashed px-5 py-8 text-center transition-colors ${drag ? "border-accent bg-accent-wash" : "border-line-strong bg-paper"}`}
                 >
+                  <span className="tile mb-3 h-11 w-11 bg-sage"><Icon name="upload" size={20} /></span>
                   <div className="text-[15px] font-semibold">Drop your statement here</div>
                   <p className="mt-1 max-w-sm text-[13px] text-muted">The PDF or CSV you download from your bank. Three months or more works best.</p>
                   <button className="btn btn-primary mt-4 w-full sm:w-auto" onClick={() => input.current?.click()}>Choose a file</button>
                   <input ref={input} type="file" accept=".pdf,.csv,application/pdf,text/csv" className="hidden" aria-label="Statement file" onChange={(e) => { const f = e.target.files?.[0]; if (f) void read(f); e.target.value = ""; }} />
-                  {error && <p role="alert" className="mt-4 max-w-md rounded-[6px] bg-alert-wash px-3 py-2 text-[13px] text-alert">{error}</p>}
+                  {error && <p role="alert" className="mt-4 max-w-md rounded-[12px] bg-alert-wash px-3 py-2 text-[13px] text-alert">{error}</p>}
                 </div>
               )}
               <div className="flex flex-wrap items-center justify-between gap-3 border-t rule px-5 py-3">

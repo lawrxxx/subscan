@@ -66,3 +66,12 @@ export function txLabel(t: { merchant: string; description: string }) {
   if (/\b(pos|card|web)\b/i.test(t.description)) return "Card payment";
   return "Unknown payee";
 }
+
+/** Short cadence for compact rows: "About once a month" -> "Monthly". Presentation only. */
+export function shortCadence(text: string | null | undefined): string | null {
+  if (!text) return null;
+  const t = text.replace(/^about\s+/i, "").toLowerCase();
+  const map: Record<string, string> = { "once a week": "weekly", "once a month": "monthly", "once a year": "yearly", "every three months": "quarterly", "every 3 months": "quarterly", "every two weeks": "every 2 weeks" };
+  const out = map[t] ?? t;
+  return out[0].toUpperCase() + out.slice(1);
+}

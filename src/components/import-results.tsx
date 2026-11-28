@@ -13,7 +13,7 @@ export function Organising({ fileName, phase }: { fileName: string; phase: numbe
   const steps = ["Reading your statement", "Finding each transaction", "Working out money in and money out", "Spotting regular payments"];
   return (
     <div className="mx-auto max-w-[520px] px-4 py-10 sm:px-6">
-      <h1 className="title text-[22px]">Organising your transactions</h1>
+      <h1 className="title text-[24px]">organising your transactions</h1>
       <p className="mt-1 truncate text-[13.5px] text-muted">{fileName}</p>
       <ol className="mt-6 space-y-3" aria-live="polite">
         {steps.map((s, i) => (
@@ -64,14 +64,14 @@ export function ImportResults({
 
   return (
     <div className="mx-auto max-w-[680px] px-4 pt-5 pb-[calc(84px+env(safe-area-inset-bottom))] sm:px-6">
-      <h1 className="title text-[22px] sm:text-[24px]">Here&rsquo;s what we found</h1>
+      <h1 className="title text-[24px] sm:text-[26px]">here&rsquo;s what we found</h1>
       <p className="mt-0.5 truncate text-[13px] text-muted">{fileName}{sum.from && sum.to ? ` · ${date(sum.from)} – ${date(sum.to)}` : ""}</p>
 
-      <dl className="panel mt-4 grid grid-cols-2 text-[13px] [&>div]:px-4 [&>div]:py-3">
-        <div className="border-r border-b rule"><dt className="text-muted">Transactions</dt><dd className="figure mt-0.5 text-[20px]">{sum.count}</dd></div>
-        <div className="border-b rule"><dt className="text-muted">Regular payments</dt><dd className="figure mt-0.5 text-[20px]">{regular}</dd></div>
-        <div className="border-r rule"><dt className="text-muted">Money in</dt><dd className="figure mt-0.5 text-[20px] text-accent">{money(sum.moneyIn, home)}</dd></div>
-        <div><dt className="text-muted">Money out</dt><dd className="figure mt-0.5 text-[20px]">{money(sum.moneyOut, home)}</dd></div>
+      <dl className="mt-4 grid grid-cols-2 gap-2 text-[12.5px] sm:grid-cols-4">
+        <div className="rounded-[14px] bg-sage px-3.5 py-3"><dt className="flex items-center gap-1 text-ink-2"><Icon name="in" size={13} className="text-positive" />money in</dt><dd className="figure mt-1 truncate text-[18px]">{money(sum.moneyIn, home)}</dd></div>
+        <div className="rounded-[14px] bg-alert-wash px-3.5 py-3"><dt className="flex items-center gap-1 text-ink-2"><Icon name="out" size={13} className="text-alert" />money out</dt><dd className="figure mt-1 truncate text-[18px]">{money(sum.moneyOut, home)}</dd></div>
+        <div className="panel px-3.5 py-3"><dt className="text-muted">transactions</dt><dd className="figure mt-1 text-[18px]">{sum.count}</dd></div>
+        <div className="panel px-3.5 py-3"><dt className="text-muted">regular payments</dt><dd className="figure mt-1 text-[18px]">{regular}</dd></div>
       </dl>
       {sum.otherCurrencies.length > 0 && <p className="mt-1.5 text-[12px] text-muted">Totals don&rsquo;t include payments in {sum.otherCurrencies.join(", ")}.</p>}
       {sum.duplicates > 0 && <p className="mt-1.5 text-[12.5px] text-muted">{sum.duplicates} transaction{sum.duplicates === 1 ? " was" : "s were"} already added from an earlier statement and will be skipped.</p>}
@@ -79,78 +79,82 @@ export function ImportResults({
       <section className="mt-5" aria-label="Needs your attention">
         {sum.attention.length ? (
           <>
-            <h2 className="text-[15px] font-semibold">{sum.attention.length} need{sum.attention.length === 1 ? "s" : ""} your attention</h2>
+            <h2 className="section-title">{sum.attention.length} need{sum.attention.length === 1 ? "s" : ""} your attention</h2>
             <p className="text-[12.5px] text-muted">Everything else is sorted. Anything you leave here won&rsquo;t be imported.</p>
             {suggestable.length > 1 && (
-              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-[6px] border rule bg-surface px-3 py-2">
+              <div className="callout callout-sage mt-2.5 flex-wrap py-2.5">
                 <span className="text-[12.5px] text-ink-2">{suggestable.length} have a suggested direction based on their wording.</span>
-                <button className="btn btn-ghost btn-sm" onClick={() => onChange(rows.map((r) => (suggestable.includes(r) ? editRow(r, { direction: r.hint! }) : r)))}>Use the suggestions for {suggestable.length}</button>
+                <button className="btn btn-primary btn-sm" onClick={() => onChange(rows.map((r) => (suggestable.includes(r) ? editRow(r, { direction: r.hint! }) : r)))}>use suggestions for {suggestable.length}</button>
               </div>
             )}
-            <ul className="mt-2 divide-y divide-[var(--color-rule)] border-y rule">
+            <div className="panel mt-2.5">
+            <ul className="rows">
               {sum.attention.map((r) => {
                 const reason = r.issues[0];
                 return (
-                  <li key={r.id} className="py-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <button className="min-w-0 text-left" onClick={() => setOpenId(r.id)}>
-                        <span className="block text-[14.5px] font-medium">{rowLabel(r.description) }</span>
-                        <span className="block text-[12.5px] text-muted">{r.date ? date(r.date) : (r.rawDate ?? "No date")}</span>
-                      </button>
-                      <span className="num shrink-0 text-[14.5px]">{r.amount ? fmt(r) : "—"}</span>
-                    </div>
+                  <li key={r.id} className="px-4 py-3">
+                    <button className="flex w-full items-start justify-between gap-3 text-left" onClick={() => setOpenId(r.id)}>
+                      <span className="min-w-0">
+                        <span className="row-title">{rowLabel(r.description)}</span>
+                        <span className="row-sub">{r.date ? date(r.date, "day") : (r.rawDate ?? "No date")}</span>
+                      </span>
+                      <span className="row-amount">{r.amount ? fmt(r) : "—"}</span>
+                    </button>
                     {r.issues.map((i) => <p key={i} className="mt-1 text-[12.5px] text-amber">{REASON_HELP[i] ?? i}</p>)}
-                    <p className="mt-0.5 line-clamp-2 text-[12px] text-faint">{r.description}</p>
-                    <div className="mt-2 grid grid-cols-3 gap-2">
+                    {reason === ISSUE.direction && r.hint && <p className="text-[12px] text-muted">Suggested from the wording. Please check.</p>}
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
                       {reason === ISSUE.direction ? (
                         <>
-                          <button className={`btn btn-ghost px-2 ${r.hint === "credit" ? "!border-accent text-accent" : ""}`} onClick={() => update(r.id, { direction: "credit" })}>Money in</button>
-                          <button className={`btn btn-ghost px-2 ${r.hint === "debit" ? "!border-accent text-accent" : ""}`} onClick={() => update(r.id, { direction: "debit" })}>Money out</button>
+                          <button className={`btn btn-sm ${r.hint === "credit" ? "btn-ghost !border-accent text-accent" : "btn-ghost"}`} onClick={() => update(r.id, { direction: "credit" })}><Icon name="in" size={14} />money in{r.hint === "credit" && <span className="text-[11px] font-normal text-muted"> · suggested</span>}</button>
+                          <button className={`btn btn-sm ${r.hint === "debit" ? "btn-ghost !border-accent text-accent" : "btn-ghost"}`} onClick={() => update(r.id, { direction: "debit" })}><Icon name="out" size={14} />money out{r.hint === "debit" && <span className="text-[11px] font-normal text-muted"> · suggested</span>}</button>
                         </>
                       ) : reason === ISSUE.repeat ? (
-                        <button className="btn btn-ghost col-span-2 px-2" onClick={() => update(r.id, { include: true })}>Keep both</button>
+                        <button className="btn btn-ghost btn-sm" onClick={() => update(r.id, { include: true })}>keep both</button>
                       ) : (
-                        <button className="btn btn-ghost col-span-2 px-2" onClick={() => setOpenId(r.id)}>Fix it</button>
+                        <button className="btn btn-ghost btn-sm" onClick={() => setOpenId(r.id)}>fix it</button>
                       )}
-                      <button className="btn btn-quiet px-2" onClick={() => update(r.id, { skipped: true, include: false })}>{reason === ISSUE.repeat ? "Skip copy" : "Skip"}</button>
+                      <button className="btn btn-quiet btn-sm text-muted" onClick={() => update(r.id, { skipped: true, include: false })}>{reason === ISSUE.repeat ? "skip copy" : "skip"}</button>
+                      {r.issues.length > 1 && reason !== ISSUE.repeat && <button className="ml-auto text-[12.5px] text-ink underline underline-offset-2" onClick={() => setOpenId(r.id)}>more to fix</button>}
                     </div>
-                    {reason === ISSUE.direction && r.hint && <p className="mt-1 text-[12px] text-muted">Suggested: {r.hint === "credit" ? "money in" : "money out"}, from the wording. Please check.</p>}
-                    {r.issues.length > 1 && reason !== ISSUE.repeat && <button className="mt-1 text-[12.5px] text-ink underline" onClick={() => setOpenId(r.id)}>Fix the other details</button>}
                   </li>
                 );
               })}
             </ul>
+            </div>
           </>
         ) : (
-          <p className="flex items-center gap-2 rounded-[6px] bg-accent-wash px-3 py-2.5 text-[13.5px]"><Icon name="check" size={15} className="text-accent" />Nothing needs your attention.</p>
+          <p className="callout callout-sage justify-start"><Icon name="check" size={16} className="text-positive" />Nothing needs your attention. Everything is sorted.</p>
         )}
       </section>
 
       <section className="mt-6" aria-label="All transactions">
         <div className="flex items-baseline justify-between">
-          <h2 className="text-[15px] font-semibold">All transactions</h2>
-          <span className="text-[12.5px] text-muted">Tap one to see or change it</span>
+          <h2 className="section-title">all transactions</h2>
+          <span className="text-[12.5px] text-muted">tap one to change it</span>
         </div>
-        <ul className="mt-2 divide-y divide-[var(--color-rule-soft)] border-y rule">
+        <div className="panel mt-2">
+        <ul className="rows">
           {visible.map((r) => {
             const unsure = r.issues.includes(ISSUE.direction);
             const off = !r.include || r.skipped;
+            const credit = !unsure && r.direction === "credit";
             return (
               <li key={r.id}>
-                <button className={`flex w-full items-center justify-between gap-3 py-2.5 text-left ${off ? "opacity-50" : ""}`} onClick={() => setOpenId(r.id)}>
-                  <span className="min-w-0">
-                    <span className="block truncate text-[14px]">{rowLabel(r.description)}</span>
-                    <span className="block text-[12px] text-muted">{r.date ? date(r.date, "day") : "No date"}{r.skipped ? " · skipped" : r.issues.length ? " · needs attention" : ""}</span>
+                <button className={`row ${off ? "opacity-50" : ""}`} onClick={() => setOpenId(r.id)}>
+                  <span className="flex min-w-0 items-center gap-3">
+                    <span className={`tile h-9 w-9 ${unsure ? "bg-amber-wash text-amber" : credit ? "bg-sage text-positive" : "bg-paper-2 text-ink-2"}`} aria-label={unsure ? "In or out?" : credit ? "Money in" : "Money out"}><Icon name={unsure ? "alert" : credit ? "in" : "out"} size={16} /></span>
+                    <span className="min-w-0">
+                      <span className="row-title !font-normal">{rowLabel(r.description)}</span>
+                      <span className="row-sub">{r.date ? date(r.date, "day") : "No date"}{r.skipped ? " · skipped" : r.issues.length ? " · needs attention" : ""}</span>
+                    </span>
                   </span>
-                  <span className={`num shrink-0 text-right text-[14px] ${!unsure && r.direction === "credit" ? "text-accent" : ""}`}>
-                    {unsure ? "" : r.direction === "credit" ? "+" : "−"}{r.amount ? fmt(r) : "—"}
-                    <span className="block text-[11px] text-muted">{unsure ? "In or out?" : r.direction === "credit" ? "Money in" : "Money out"}</span>
-                  </span>
+                  <span className={`row-amount ${credit ? "text-positive" : ""}`}>{unsure ? "" : credit ? "+" : "−"}{r.amount ? fmt(r) : "—"}</span>
                 </button>
               </li>
             );
           })}
         </ul>
+        </div>
         {listed.length > 8 && <button className="mt-2 text-[13px] text-muted hover:text-ink" onClick={() => setShowAll((v) => !v)}>{showAll ? "Show fewer" : `Show all ${listed.length}`}</button>}
       </section>
 
@@ -189,7 +193,7 @@ function RowSheet({ r, onClose, onSave }: { r: ExtractedRow; onClose(): void; on
   return (
     <div className="anim-fade fixed inset-0 z-40 flex items-end justify-center bg-ink/25 sm:items-center" onClick={onClose} role="dialog" aria-modal aria-label="Transaction details">
       <form
-        className="anim-rise max-h-[88dvh] w-full max-w-[520px] overflow-y-auto rounded-t-[10px] bg-surface px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-xl sm:rounded-[8px]"
+        className="anim-rise max-h-[88dvh] w-full max-w-[520px] overflow-y-auto rounded-t-[10px] bg-surface px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-xl sm:rounded-[16px]"
         onClick={(e) => e.stopPropagation()}
         onSubmit={(e) => {
           e.preventDefault();

@@ -26,6 +26,19 @@ const PATHS: Record<string, string> = {
   doc: "M14 3H7a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V7l-4-4Zm0 0v4h4M9 13h6M9 16h4",
   lock: "M7 11V8a5 5 0 0 1 10 0v3M6 11h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1Z",
   spark: "M12 4v4m0 8v4M4 12h4m8 0h4",
+  chev: "m9.5 6 6 6-6 6",
+  back: "M19 12H5m6-6-6 6 6 6",
+  calendar: "M7 3v3m10-3v3M4.5 9h15M5.5 5h13a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-13a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z",
+  copy: "M9 9h10a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1Zm-3 6H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v1",
+  bolt: "M13 3 5 13.5h6L10 21l8-10.5h-6L13 3Z",
+  play: "M8 5.5v13l10.5-6.5L8 5.5Z",
+  shield: "M12 3 5 6v5.5c0 4.2 3 7.9 7 9.5 4-1.6 7-5.3 7-9.5V6l-7-3Zm-3 9 2 2 4-4",
+  users: "M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm-6 9c.6-3 3-5 6-5s5.4 2 6 5m1-9a3 3 0 1 0-.8-5.9M17.5 15c1.9.5 3.2 2.3 3.5 5",
+  swap: "M7 7h12m0 0-3.5-3.5M19 7l-3.5 3.5M17 17H5m0 0 3.5 3.5M5 17l3.5-3.5",
+  leaf: "M5 19c0-8 5-13 15-14-1 10-6 15-14 15M5 19l7-7",
+  coins: "M12 8c4.4 0 8-1.3 8-3s-3.6-3-8-3-8 1.3-8 3 3.6 3 8 3Zm8-3v5c0 1.7-3.6 3-8 3s-8-1.3-8-3V5m16 5v5c0 1.7-3.6 3-8 3s-8-1.3-8-3v-5m16 5v4c0 1.7-3.6 3-8 3s-8-1.3-8-3v-4",
+  in: "M17 7 7 17m0 0h8m-8 0V9",
+  out: "M7 17 17 7m0 0H9m8 0v8",
 };
 
 export function Icon({ name, size = 18, className = "" }: { name: keyof typeof PATHS | string; size?: number; className?: string }) {
@@ -36,14 +49,14 @@ export function Icon({ name, size = 18, className = "" }: { name: keyof typeof P
   );
 }
 
-/** Page header: serif title, short description, actions on the right. */
+/** Page header: compact lowercase title, one line of context, actions on the right. */
 export function PageBar({ title, sub, actions, children }: { title: ReactNode; sub?: ReactNode; actions?: ReactNode; children?: ReactNode }) {
   return (
-    <div className="px-4 pt-5 pb-4 sm:px-6 lg:px-8 lg:pt-7">
+    <div className="px-4 pt-4 pb-4 sm:px-6 lg:px-8 lg:pt-8">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
-          <h1 className="title text-[22px] sm:text-[24px]">{title}</h1>
-          {sub && <p className="mt-0.5 text-[13px] text-muted">{sub}</p>}
+          <h1 className="title text-[26px] sm:text-[28px]">{typeof title === "string" ? title.toLowerCase() : title}</h1>
+          {sub && <p className="mt-1 text-[13.5px] text-muted">{sub}</p>}
         </div>
         {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
       </div>
@@ -56,13 +69,13 @@ export function Stat({ label, value, sub, tone }: { label: ReactNode; value: Rea
   return (
     <div className="min-w-0 px-4 py-4 sm:px-5">
       <div className="label">{label}</div>
-      <div className={`figure mt-1.5 truncate text-[24px] sm:text-[26px] ${tone === "alert" ? "text-alert" : tone === "accent" ? "text-accent" : ""}`}>{value}</div>
+      <div className={`figure mt-1.5 truncate text-[22px] sm:text-[24px] ${tone === "alert" ? "text-alert" : tone === "accent" ? "text-accent" : ""}`}>{value}</div>
       {sub && <div className="mt-1 text-[12px] text-muted">{sub}</div>}
     </div>
   );
 }
 
-const AVATAR_TONES = ["#e7e1d3", "#dfe6dc", "#e6dfe2", "#dde3ea", "#ebe3d2", "#e0e4df"];
+const AVATAR_TONES = ["#efe6d6", "#dce7d9", "#ece4d8", "#e3e8e1", "#f2e8d8", "#e6e3da"];
 
 /** Merchant monogram — no third-party logos. */
 export function Avatar({ name, size = 32 }: { name: string; size?: number }) {
@@ -70,7 +83,7 @@ export function Avatar({ name, size = 32 }: { name: string; size?: number }) {
   const letters = (clean.split(/\s+/).slice(0, 2).map((w) => w[0]).join("") || "•").toUpperCase();
   const tone = AVATAR_TONES[[...clean].reduce((s, c) => s + c.charCodeAt(0), 0) % AVATAR_TONES.length];
   return (
-    <span className="inline-flex shrink-0 items-center justify-center rounded-[6px] text-[11px] font-semibold text-ink-2" style={{ width: size, height: size, background: tone }} aria-hidden>
+    <span className="inline-flex shrink-0 items-center justify-center rounded-[12px] text-[11px] font-semibold text-ink-2" style={{ width: size, height: size, background: tone }} aria-hidden>
       {letters}
     </span>
   );
@@ -103,11 +116,21 @@ export function RecurrenceText({ s }: { s: Subscription }) {
 
 export function EmptyPanel({ icon = "doc", title, children, action }: { icon?: string; title: string; children?: ReactNode; action?: ReactNode }) {
   return (
-    <div className="flex flex-col items-center px-6 py-12 text-center">
-      <span className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-full bg-paper-2 text-muted"><Icon name={icon} /></span>
+    <div className="flex flex-col items-center px-6 py-10 text-center">
+      <span className="tile mb-3 h-11 w-11 bg-sage"><Icon name={icon} size={20} /></span>
       <div className="text-[15px] font-semibold">{title}</div>
       {children && <p className="mt-1 max-w-sm text-[13px] text-muted">{children}</p>}
       {action && <div className="mt-4">{action}</div>}
+    </div>
+  );
+}
+
+/** A section heading on the page with an optional link on the right. */
+export function SectionHead({ title, href, link, className = "" }: { title: ReactNode; href?: string; link?: string; className?: string }) {
+  return (
+    <div className={`mb-2 flex items-baseline justify-between gap-3 px-1 ${className}`}>
+      <h2 className="section-title">{title}</h2>
+      {href && <Link href={href} className="section-link">{link ?? "see all"}</Link>}
     </div>
   );
 }

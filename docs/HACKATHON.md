@@ -76,7 +76,7 @@ Key files
 | Agent key custody | Per-user key generated server-side, sealed; never in the browser, never stored server-side |
 | ERC-8021 | `altana,subscan,celo_e97672462153` on every Autopilot transaction (`appCode`) |
 | ERC-8004 | Autopilot wallet registered by the SDK after its first admin action as "subscan Autopilot" (registry `0x8004A169FB4a3325136EB29fA0ceB6D2e539a432`) |
-| Grant cost | Relay fee only (a few cents). subscan grants with `register: false`: the session is authorised and enforced by the wallet contract; only the optional public KeyStore listing (~9–18 CELO per key, measured) is skipped |
+| Grant cost | A new wallet's first admin action registers the wallet in Altana's KeyStore: ≈9.3 CELO once (measured), shown before the user confirms. Each session key is granted with `register: false`, so later grants cost only the relay fee; the session is still authorised and enforced by the wallet contract (only the optional public listing of the session key, another ≈9.3 CELO each time, is skipped) |
 | Live mainnet permission tests | **All 8 passed on Celo mainnet, 28 Nov 2026** (§8) |
 
 ## 4. Environment variables (Vercel)
@@ -165,7 +165,7 @@ the app's payment history.
 
 **Altana (≈ 3 min)**
 1. Settings → *Autopilot*: read "what it can and can't do".
-2. *Create Autopilot wallet* (Face ID). *Add money* from MiniPay (a few USD₮; network fees are paid in USD₮).
+2. *Create Autopilot wallet* (Face ID). *Add money* from MiniPay (≈10 CELO for the one-time wallet registration, plus a few USD₮).
 3. Set limits (e.g. 20 USD₮ / 30,000 cNGN a month), approve the bill's recipient, 30 days; *Give subscan access* (Face ID). Show the grant on Celoscan.
 4. Mark the bill *Auto*; open **Agent**: the bill shows *Paying now* with the rule that allowed it; tap *Pay due now* (or open Home): Autopilot pays it (converting USD₮→cNGN on Textile in the same transaction) and shows the hash.
 5. Try a bill to an unapproved recipient → refused, with the reason. Lower the limit → over-limit refused by the wallet.

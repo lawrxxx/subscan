@@ -3,8 +3,9 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { EditPayment } from "@/components/edit-payment";
 import { Wordmark } from "@/components/shell";
+import { Avatar, Icon } from "@/components/ui";
 import { useStore } from "@/lib/db/store";
-import { date, money } from "@/lib/format";
+import { date, money, shortCadence } from "@/lib/format";
 import {
   amountsVary,
   bulkEligible,
@@ -53,13 +54,13 @@ export default function Review() {
       <header className="sticky top-0 z-20 border-b rule bg-paper/95 backdrop-blur">
         <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-2.5 sm:px-6">
           <Wordmark className="text-[19px]" />
-          <Link href="/" className="btn btn-quiet btn-sm">Close</Link>
+          <Link href="/" className="btn btn-quiet btn-sm" aria-label="Close">Close</Link>
         </div>
       </header>
 
       <main className="mx-auto max-w-3xl px-4 pt-5 pb-[calc(88px+env(safe-area-inset-bottom))] sm:px-6">
-        <h1 className="title text-[21px] sm:text-[24px]">Check your payments</h1>
-        <p className="mt-1 text-[14px] text-ink-2">These came up more than once in your statement. Tell us which ones you pay regularly.</p>
+        <h1 className="title text-[24px] sm:text-[26px]">check your payments</h1>
+        <p className="mt-1 text-[13.5px] text-muted">These came up more than once. Tell us which ones you pay regularly.</p>
 
         {all.length > 0 && (
           <div className="mt-4">
@@ -85,7 +86,7 @@ export default function Review() {
         ) : (
           <>
             {eligible.length > 1 && (
-              <div className="mt-4 rounded-[6px] border rule bg-surface">
+              <div className="mt-4 rounded-[14px] bg-sage">
                 {!bulkOpen ? (
                   <div className="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
                     <p className="text-[13px] text-ink-2"><span className="font-medium text-ink">{eligible.length} are very likely regular</span>: they came in three or more times, evenly spaced.</p>
@@ -119,7 +120,7 @@ export default function Review() {
                   <button className="hover:text-ink" onClick={() => setMode(mode === "one" ? "all" : "one")}>{mode === "one" ? `See all ${pending.length} at once` : "One at a time"}</button>
                 </div>
               )}
-              <ul className="mt-1.5 divide-y divide-[var(--color-rule)] border-y rule" aria-label="Suggestions awaiting review">
+              <ul className="panel rows mt-1.5" aria-label="Suggestions awaiting review">
                 {(mode === "one" ? pending.slice(0, 1) : pending).map((s) => <Suggestion key={s.id} s={s} raw={rawDescription(s, state.transactions)} onStatus={set} onSave={(p, name) => { updateSubscription(s.id, { ...p, status: "confirmed" }); logAction({ kind: "confirmed", title: `Edited and confirmed ${name}`, href: `/payments/${encodeURIComponent(s.id)}` }); }} />)}
               </ul>
               {mode === "one" && pending.length > 1 && (
@@ -127,7 +128,7 @@ export default function Review() {
               )}
               </>
             ) : (
-              <div className="mt-5 rounded-[6px] bg-accent-wash px-4 py-3 text-[14px]">
+              <div className="callout callout-sage mt-5 block text-[14px]">
                 <span className="font-medium">All done.</span> You&rsquo;ve reviewed every suggestion.
               </div>
             )}
@@ -181,42 +182,47 @@ function Suggestion({ s, raw, onStatus, onSave }: { s: Subscription; raw?: strin
   const label = displayLabel(s, raw);
   const lv = level(s);
   const fmt = (n: number) => money(n, s.currency);
-  const freq = frequencyText(s);
+  const freq = shortCadence(frequencyText(s));
   const next = predictedNext(s);
   const dates = s.history.map((h) => h.date).sort();
   const shown = dates.slice(-4);
   const varies = amountsVary(s);
 
+  const [details, setDetails] = useState(false);
   return (
-    <li className="py-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className={`truncate text-[15px] font-semibold ${label.unknown ? "text-ink-2" : ""}`}>{label.name}</div>
-          {label.detail && <div className="truncate text-[12px] text-muted" title={label.detail}>{label.unknown ? "Statement shows: " : ""}{label.detail}</div>}
+    <li className="px-4 py-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <Avatar name={label.name} size={40} />
+          <div className="min-w-0">
+            <div className={`truncate text-[15.5px] font-semibold ${label.unknown ? "text-ink-2" : ""}`}>{label.name}</div>
+            <div className="truncate text-[12.5px] text-muted">{freq ?? "Frequency unclear"}{next ? ` · next ${date(next, "day")}` : ""}</div>
+          </div>
         </div>
-        <div className="shrink-0 text-right">
-          <div className="num text-[15px] font-semibold">{varies ? "≈ " : ""}{fmt(s.amount)}</div>
-          <div className="text-[12px] text-muted">{freq ?? "Frequency unclear"}</div>
-        </div>
+        <div className="num shrink-0 text-[16px] font-semibold">{varies ? "≈ " : ""}{fmt(s.amount)}</div>
       </div>
 
-      <div className="mt-1.5 text-[12.5px] leading-snug">
+      <div className="mt-2.5 text-[13px] leading-snug">
         <span className={`font-medium ${LEVEL_TONE[lv]}`}>{LEVEL_LABEL[lv]}.</span> <span className="text-ink-2">{explain(s, fmt)}</span>
       </div>
-      <div className="mt-1 text-[12px] text-muted">
-        <span className="num">{s.history.length} payments</span>: {dates.length > shown.length && "… "}
-        <span className="num">{shown.map((d) => date(d, "day")).join(", ")}{dates[dates.length - 1].slice(0, 4) !== new Date().toISOString().slice(0, 4) ? ` ${dates[dates.length - 1].slice(0, 4)}` : ""}</span>
-        {" · "}
-        {next ? <>next expected around <span className="num">{date(next)}</span></> : "not enough history to predict the next one"}
-      </div>
+      <button className="mt-1 text-[12.5px] text-muted underline underline-offset-2 hover:text-ink" onClick={() => setDetails((v) => !v)} aria-expanded={details}>{details ? "hide details" : `see ${s.history.length} payments`}</button>
+      {details && (
+        <div className="mt-1.5 rounded-[10px] bg-paper-2 px-3 py-2 text-[12px] text-ink-2">
+          {label.detail && <div className="truncate" title={label.detail}>{label.unknown ? "Statement shows: " : ""}{label.detail}</div>}
+          <div><span className="num">{s.history.length} payments</span>: {dates.length > shown.length && "… "}
+          <span className="num">{shown.map((d) => date(d, "day")).join(", ")}{dates[dates.length - 1].slice(0, 4) !== new Date().toISOString().slice(0, 4) ? ` ${dates[dates.length - 1].slice(0, 4)}` : ""}</span>
+          {" · "}
+          {next ? <>next expected around <span className="num">{date(next)}</span></> : "not enough history to predict the next one"}</div>
+        </div>
+      )}
 
       {editing ? (
         <EditPayment s={s} initialName={label.unknown ? "" : label.name} submitLabel="Save and confirm" onCancel={() => setEditing(false)} onSave={(p, name) => { onSave(p, name); setEditing(false); }} />
       ) : (
-        <div className="mt-2.5 grid grid-cols-3 gap-2 sm:flex sm:justify-end">
-          <button className="btn btn-primary px-2" onClick={() => onStatus(s, "confirmed", label.name)} aria-label={`Confirm ${label.name} as a regular payment`}>Yes, regular</button>
-          <button className="btn btn-ghost px-2" onClick={() => setEditing(true)} aria-label={`Edit details for ${label.name}`}>Edit details</button>
-          <button className="btn btn-ghost px-2" onClick={() => onStatus(s, "dismissed", label.name)} aria-label={`${label.name} is not a regular payment`}>Not regular</button>
+        <div className="mt-3.5 grid grid-cols-2 gap-2 sm:flex sm:justify-end">
+          <button className="btn btn-primary col-span-2 sm:order-3" onClick={() => onStatus(s, "confirmed", label.name)} aria-label={`Confirm ${label.name} as a regular payment`}><Icon name="check" size={16} />Yes, regular</button>
+          <button className="btn btn-ghost" onClick={() => onStatus(s, "dismissed", label.name)} aria-label={`${label.name} is not a regular payment`}>Not regular</button>
+          <button className="btn btn-quiet" onClick={() => setEditing(true)} aria-label={`Edit details for ${label.name}`}>Edit details</button>
         </div>
       )}
     </li>

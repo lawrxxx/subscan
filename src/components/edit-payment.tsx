@@ -12,7 +12,7 @@ export function EditPayment({ s, initialName, submitLabel = "Save changes", onCa
   const [err, setErr] = useState<string>();
   return (
     <form
-      className="mt-3 grid gap-3 rounded-[6px] border rule bg-surface p-3 sm:grid-cols-2"
+      className="mt-3 grid gap-3 rounded-[12px] border rule bg-surface p-3 sm:grid-cols-2"
       onSubmit={(e) => {
         e.preventDefault();
         const amt = Number(amount.replace(/[,\s]/g, ""));

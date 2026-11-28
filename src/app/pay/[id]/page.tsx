@@ -307,7 +307,7 @@ export default function Pay() {
               <div className="panel-head"><h2 className="panel-title">Review and approve</h2></div>
               <div className="px-4 py-4 sm:px-5">
                 {blockers.length > 0 && (
-                  <div className="mb-4 rounded-[6px] bg-alert-wash px-3 py-2.5">
+                  <div className="mb-4 rounded-[12px] bg-alert-wash px-3 py-2.5">
                     <div className="text-[12.5px] font-medium text-alert">Before you can pay</div>
                     <ul className="mt-1 space-y-1 text-[12.5px] text-alert">{blockers.map((b) => <li key={b}>· {b}</li>)}</ul>
                   </div>
@@ -330,7 +330,7 @@ export default function Pay() {
                         <li key={t} className="grid grid-cols-[20px_1fr]"><span className="num text-faint">{i + 1}</span><span>{t}</span></li>
                       ))}
                     </ol>
-                    <label className="mb-4 flex items-start gap-2.5 rounded-[6px] border rule px-3 py-2.5 text-[12.5px]">
+                    <label className="mb-4 flex items-start gap-2.5 rounded-[12px] border rule px-3 py-2.5 text-[12.5px]">
                       <input type="checkbox" className="mt-0.5 accent-[var(--color-accent)]" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
                       <span>I authorise these Celo mainnet transactions from {w.address.slice(0, 6)}…{w.address.slice(-4)}. They can&rsquo;t be reversed.</span>
                     </label>

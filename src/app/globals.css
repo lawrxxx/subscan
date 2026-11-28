@@ -1,42 +1,49 @@
 @import "tailwindcss";
 
 /* subscan design system
-   Neutral paper ground, white working surfaces, one deep-green accent.
-   Type: IBM Plex Sans for all interface text and figures (tabular). Newsreader
-   serif is reserved for the wordmark and the one welcome line a new user sees.
-   Spacing: 4px base (4/8/12/16/20/24/32). Page content max 1200px.
-   Controls: 36px desktop, 44px on touch. Table rows 44px.
-   Colour carries meaning only: green = done/active, amber = needs a decision,
-   red = failed/overdue, blue = in progress. */
+   Warm ivory ground, near-white working surfaces, deep forest for brand and primary actions.
+   Palette: deep forest #173F32 · warm ivory #F6F2E9 · soft sage #DCE7D9 · muted sand #D8B98C
+            charcoal #292D29 · stone #E8E4DA.
+   Type: Inter for interface text and figures (tabular). Newsreader serif only for the wordmark.
+   Status colour carries meaning only: green = done, amber = pending / needs you, red = failed.
+   Shape: grouped lists on 14px-radius surfaces; pill-shaped buttons and segmented controls. */
 @theme {
-  --color-paper: #f5f3ee;
-  --color-paper-2: #eeebe3;
-  --color-surface: #fffefb;
-  --color-stone: #e6e1d6;
-  --color-rule: #e3ded3;
-  --color-rule-soft: #ece8df;
-  --color-line-strong: #cdc6b6;
-  --color-ink: #1a1916;
-  --color-ink-2: #3b3832;
-  --color-muted: #6d685d;
-  --color-faint: #9d978a;
-  --color-accent: #1d4a36;
-  --color-accent-2: #2b6a4e;
-  --color-accent-wash: #e2ebe3;
-  --color-alert: #9a3b1f;
-  --color-alert-wash: #f6e4dc;
-  --color-amber: #85601a;
-  --color-amber-wash: #f5ecd4;
+  --color-forest: #173f32;
+  --color-ivory: #f6f2e9;
+  --color-sage: #dce7d9;
+  --color-sand: #d8b98c;
+  --color-sand-wash: #f2e8d8;
+  --color-charcoal: #292d29;
+
+  --color-paper: #f6f2e9;
+  --color-paper-2: #efeadf;
+  --color-surface: #fffdf8;
+  --color-stone: #e8e4da;
+  --color-rule: #e8e4da;
+  --color-rule-soft: #efebe2;
+  --color-line-strong: #d3cdbf;
+  --color-ink: #292d29;
+  --color-ink-2: #474c47;
+  --color-muted: #6c716b;
+  --color-faint: #9a9e97;
+  --color-accent: #173f32;
+  --color-accent-2: #22533f;
+  --color-accent-wash: #dce7d9;
+  --color-positive: #2f7a4f;
+  --color-alert: #a13a28;
+  --color-alert-wash: #f6e2db;
+  --color-amber: #8a6114;
+  --color-amber-wash: #f5ead3;
   --color-info: #2f4b6e;
   --color-info-wash: #e4eaf2;
 
   --font-serif: "Newsreader Variable", "Iowan Old Style", Georgia, serif;
-  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
 
-  --radius-xs: 3px;
-  --radius-sm: 4px;
-  --radius-md: 6px;
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
 }
 
 @layer base {
@@ -51,6 +58,7 @@
     font-family: var(--font-sans);
     font-size: 14px;
     line-height: 1.5;
+    font-feature-settings: "cv11", "ss01";
   }
   ::selection {
     background: var(--color-accent-wash);
@@ -70,9 +78,9 @@
   /* Page titles: sans, compact. */
   .title {
     font-family: var(--font-sans);
-    font-weight: 600;
-    letter-spacing: -0.012em;
-    line-height: 1.2;
+    font-weight: 650;
+    letter-spacing: -0.022em;
+    line-height: 1.15;
   }
   .display {
     font-family: var(--font-serif);
@@ -82,8 +90,8 @@
   }
   .figure {
     font-family: var(--font-sans);
-    font-weight: 500;
-    letter-spacing: -0.02em;
+    font-weight: 620;
+    letter-spacing: -0.025em;
     line-height: 1.05;
     font-variant-numeric: tabular-nums;
   }
@@ -122,13 +130,67 @@
     align-items: center;
     justify-content: space-between;
     gap: 0.75rem;
-    padding: 0.85rem 1rem;
-    border-bottom: 1px solid var(--color-rule);
+    padding: 0.85rem 1rem 0.55rem;
   }
   .panel-title {
     font-size: 14px;
     font-weight: 600;
     color: var(--color-ink);
+  }
+  /* Section heading that sits on the page (not inside a surface). */
+  .section-title {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--color-ink);
+  }
+  .section-link {
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--color-muted);
+  }
+  .section-link:hover { color: var(--color-ink); }
+  /* Grouped rows: hairline dividers inset from the edge, no per-row cards. */
+  .rows > * + * { border-top: 1px solid var(--color-rule-soft); }
+  .row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    min-height: 3.5rem;
+    padding: 0.65rem 1rem;
+    width: 100%;
+    text-align: left;
+  }
+  a.row:hover, button.row:hover { background: rgb(239 234 223 / 0.55); }
+  .row-title { display: block; font-size: 14px; font-weight: 550; color: var(--color-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row-sub { display: block; font-size: 12.5px; color: var(--color-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row-amount { flex-shrink: 0; font-size: 14px; font-weight: 550; font-variant-numeric: tabular-nums; text-align: right; }
+  .chev { flex-shrink: 0; color: var(--color-faint); }
+  /* Callouts: one quiet strip, tinted by meaning. */
+  .callout {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    border-radius: var(--radius-md);
+    padding: 0.8rem 1rem;
+    font-size: 13.5px;
+  }
+  .callout-sage { background: var(--color-sage); color: var(--color-ink); }
+  .callout-amber { background: var(--color-amber-wash); color: var(--color-ink); }
+  .callout-red { background: var(--color-alert-wash); color: var(--color-ink); }
+  /* Icon tile used beside a row title. */
+  .tile {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 10px;
+    background: var(--color-paper-2);
+    color: var(--color-accent);
   }
 
   /* Tables (Stripe-style) -------------------------------------------------- */
@@ -160,7 +222,7 @@
     cursor: pointer;
   }
   .tbl tbody tr:hover td {
-    background: #faf8f3;
+    background: #faf7f0;
   }
   .tbl .r {
     text-align: right;
@@ -229,28 +291,27 @@
     align-items: center;
     justify-content: center;
     gap: 0.45rem;
-    height: 2.25rem;
-    padding: 0 0.9rem;
-    border-radius: var(--radius-sm);
+    height: 2.4rem;
+    padding: 0 1.05rem;
+    border-radius: 999px;
     font-size: 13.5px;
-    font-weight: 500;
+    font-weight: 550;
     transition: background-color 120ms, color 120ms, border-color 120ms, box-shadow 120ms;
     white-space: nowrap;
   }
   .btn-sm {
-    height: 1.85rem;
-    padding: 0 0.65rem;
+    height: 2rem;
+    padding: 0 0.8rem;
     font-size: 12.5px;
   }
   .btn-lg {
-    height: 2.75rem;
-    padding: 0 1.25rem;
-    font-size: 14.5px;
+    height: 3rem;
+    padding: 0 1.4rem;
+    font-size: 15px;
   }
   .btn-primary {
     background: var(--color-accent);
     color: #fbfaf6;
-    box-shadow: inset 0 -1px 0 rgb(0 0 0 / 0.15);
   }
   .btn-primary:hover {
     background: var(--color-accent-2);
@@ -270,7 +331,7 @@
   .btn-ghost:hover,
   .btn-secondary:hover {
     border-color: var(--color-line-strong);
-    background: #fbfaf6;
+    background: var(--color-paper-2);
   }
   .btn-ghost:disabled {
     color: var(--color-faint);
@@ -284,9 +345,10 @@
   }
   .btn-danger {
     background: var(--color-surface);
-    border: 1px solid var(--color-alert-wash);
+    border: 1px solid rgb(161 58 40 / 0.45);
     color: var(--color-alert);
   }
+  .btn-danger:hover { background: var(--color-alert-wash); }
   .link {
     text-decoration: underline;
     text-decoration-color: var(--color-line-strong);
@@ -298,10 +360,10 @@
   .field,
   .input {
     width: 100%;
-    height: 2.25rem;
-    padding: 0 0.7rem;
+    height: 2.5rem;
+    padding: 0 0.8rem;
     background: var(--color-surface);
-    border: 1px solid var(--color-rule);
+    border: 1px solid var(--color-line-strong);
     border-radius: var(--radius-sm);
     font-size: 13.5px;
     color: var(--color-ink);
@@ -310,32 +372,36 @@
   .input:focus {
     outline: none;
     border-color: var(--color-accent);
-    box-shadow: 0 0 0 3px rgb(29 74 54 / 0.12);
+    box-shadow: 0 0 0 3px rgb(23 63 50 / 0.12);
   }
   /* Segmented control (filters, tabs) */
   .seg {
     display: inline-flex;
-    padding: 2px;
+    padding: 3px;
     gap: 2px;
-    border-radius: var(--radius-sm);
-    background: var(--color-paper-2);
+    border-radius: 999px;
+    background: var(--color-surface);
     border: 1px solid var(--color-rule);
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
   }
   .seg > button,
   .seg > a {
-    height: 1.75rem;
-    padding: 0 0.7rem;
-    border-radius: 4px;
-    font-size: 12.5px;
-    font-weight: 500;
+    height: 2rem;
+    padding: 0 0.9rem;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 550;
     color: var(--color-muted);
     white-space: nowrap;
+    flex-shrink: 0;
   }
+  .seg > button:disabled { opacity: 0.45; cursor: not-allowed; }
   .seg > [aria-selected="true"],
   .seg > [aria-pressed="true"] {
-    background: var(--color-surface);
-    color: var(--color-ink);
-    box-shadow: 0 1px 1px rgb(0 0 0 / 0.06), 0 0 0 1px var(--color-rule);
+    background: var(--color-accent);
+    color: #fbfaf6;
   }
   .tabs {
     display: flex;
@@ -371,6 +437,7 @@
     color: var(--color-muted);
     font-variant-numeric: tabular-nums;
   }
+  [aria-pressed="true"] > .count, [aria-selected="true"] > .count { background: rgb(255 255 255 / 0.18); color: inherit; }
 
   /* Agent prose ------------------------------------------------------------ */
   .prose-agent p {
@@ -397,7 +464,7 @@
 /* Touch devices: comfortable targets, and 16px inputs so iOS doesn't zoom. */
 @media (pointer: coarse) {
   .btn { height: 2.75rem; }
-  .btn-sm { height: 2.35rem; padding: 0 0.8rem; }
+  .btn-sm { height: 2.4rem; padding: 0 0.9rem; }
   .field, .input { height: 2.75rem; font-size: 16px; }
   .seg > button, .seg > a { min-height: 2.25rem; }
 }

@@ -1,9 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "@fontsource-variable/newsreader/opsz.css";
 import "@fontsource-variable/newsreader/opsz-italic.css";
-import "@fontsource/ibm-plex-sans/400.css";
-import "@fontsource/ibm-plex-sans/500.css";
-import "@fontsource/ibm-plex-sans/600.css";
+import "@fontsource-variable/inter/wght.css";
 import "@fontsource/ibm-plex-mono/400.css";
 import "./globals.css";
 import { Providers } from "./providers";
@@ -14,7 +12,7 @@ export const metadata: Metadata = {
   icons: { icon: "/icon.svg" },
 };
 
-export const viewport: Viewport = { themeColor: "#f4f1e9", width: "device-width", initialScale: 1 };
+export const viewport: Viewport = { themeColor: "#f6f2e9", width: "device-width", initialScale: 1 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

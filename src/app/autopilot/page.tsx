@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatUnits } from "viem";
-import { PageBar, PayStatus } from "@/components/ui";
+import { Icon, PageBar, PayStatus } from "@/components/ui";
 import { useWallet } from "@/components/wallet";
 import { addressUrl, TOKENS, txUrl } from "@/lib/celo/config";
 import { autopilotAvailable, createAutopilotWallet, fund, grant, passkeysSupported, quoteGrant, revoke, status, updateRecipients, type AutopilotStatus } from "@/lib/autopilot/browser";
@@ -58,28 +58,28 @@ export default function Autopilot() {
 
   return (
     <div className="mx-auto max-w-3xl">
-      <div className="px-4 pt-5 text-[13px] sm:px-6 lg:px-8"><Link href="/settings" className="text-muted hover:text-ink">← Settings</Link></div>
+      <div className="px-4 pt-4 text-[13px] sm:px-6 lg:px-8 lg:pt-8"><Link href="/settings" className="inline-flex items-center gap-1 text-muted hover:text-ink"><Icon name="back" size={15} />settings</Link></div>
       <PageBar title="Autopilot" sub="Let subscan pay the bills you choose, within limits you set." />
       <div className="space-y-4 px-4 pb-10 sm:px-6 lg:px-8">
-        {avail && !avail.available && <p className="rounded-[6px] bg-amber-wash px-3 py-2.5 text-[13.5px] text-amber">Autopilot isn&rsquo;t switched on for this site yet.</p>}
-        {err && <p className="rounded-[6px] bg-alert-wash px-3 py-2.5 text-[13.5px] text-alert" role="alert">{err}</p>}
-        {note && <p className="rounded-[6px] bg-accent-wash px-3 py-2.5 text-[13.5px] text-accent" role="status">{note}</p>}
+        {avail && !avail.available && <p className="rounded-[12px] bg-amber-wash px-3 py-2.5 text-[13.5px] text-amber">Autopilot isn&rsquo;t switched on for this site yet.</p>}
+        {err && <p className="rounded-[12px] bg-alert-wash px-3 py-2.5 text-[13.5px] text-alert" role="alert">{err}</p>}
+        {note && <p className="rounded-[12px] bg-accent-wash px-3 py-2.5 text-[13.5px] text-accent" role="status">{note}</p>}
 
         {!active && (
           <section className="panel px-4 py-4">
             <h2 className="text-[15px] font-semibold">What Autopilot can and can&rsquo;t do</h2>
             <div className="mt-2 grid gap-3 text-[13.5px] sm:grid-cols-2">
               <ul className="space-y-1">
-                <li>✓ Pay bills you switch on, when they&rsquo;re due</li>
-                <li>✓ Only to recipients you approve</li>
-                <li>✓ Up to your monthly limit</li>
-                <li>✓ Convert dollars to naira first if a bill needs it</li>
+                <li className="flex gap-2"><Icon name="check" size={16} className="mt-0.5 shrink-0 text-positive" />Pay bills you switch on, when they&rsquo;re due</li>
+                <li className="flex gap-2"><Icon name="check" size={16} className="mt-0.5 shrink-0 text-positive" />Only to recipients you approve</li>
+                <li className="flex gap-2"><Icon name="check" size={16} className="mt-0.5 shrink-0 text-positive" />Up to your monthly limit</li>
+                <li className="flex gap-2"><Icon name="check" size={16} className="mt-0.5 shrink-0 text-positive" />Convert dollars to naira first if a bill needs it</li>
               </ul>
               <ul className="space-y-1 text-ink-2">
-                <li>✗ Spend over your limit: your wallet itself blocks it</li>
-                <li>✗ Touch money outside your Autopilot wallet</li>
-                <li>✗ Keep access after it expires or you revoke it</li>
-                <li>✗ Pay anything without a record you can check</li>
+                <li className="flex gap-2"><Icon name="close" size={16} className="mt-0.5 shrink-0 text-alert" />Spend over your limit: your wallet itself blocks it</li>
+                <li className="flex gap-2"><Icon name="close" size={16} className="mt-0.5 shrink-0 text-alert" />Touch money outside your Autopilot wallet</li>
+                <li className="flex gap-2"><Icon name="close" size={16} className="mt-0.5 shrink-0 text-alert" />Keep access after it expires or you revoke it</li>
+                <li className="flex gap-2"><Icon name="close" size={16} className="mt-0.5 shrink-0 text-alert" />Pay anything without a record you can check</li>
               </ul>
             </div>
           </section>
@@ -132,12 +132,16 @@ export default function Autopilot() {
         {/* Active */}
         {active && ap && (
           <>
+            <div className={`callout ${ap.enabled ? "callout-sage" : "callout-amber"} justify-start`} role="status">
+              <span className="tile bg-surface"><Icon name={ap.enabled ? "check" : "clock"} size={17} /></span>
+              <span className="min-w-0"><span className="block font-semibold">{ap.enabled ? "autopilot is active" : "autopilot is paused"}</span><span className="block text-[12.5px] text-ink-2">{ap.enabled ? "Payments run only within your rules." : "Nothing is paid until you switch it back on."}</span></span>
+            </div>
             <section className="panel">
               <div className="panel-head">
                 <h2 className="panel-title">Automatic payments</h2>
                 <label className="flex items-center gap-2 text-[13.5px]">
-                  <button role="switch" aria-checked={ap.enabled} aria-label="Automatic payments" onClick={() => setAutopilot({ enabled: !ap.enabled })} className={`relative h-6 w-11 rounded-full border transition-colors ${ap.enabled ? "border-accent bg-accent" : "rule bg-paper-2"}`}>
-                    <span className={`absolute top-[3px] h-4 w-4 rounded-full bg-surface transition-all ${ap.enabled ? "left-[22px]" : "left-[3px]"}`} />
+                  <button role="switch" aria-checked={ap.enabled} aria-label="Automatic payments" onClick={() => setAutopilot({ enabled: !ap.enabled })} className={`relative h-7 w-12 rounded-full transition-colors ${ap.enabled ? "bg-accent" : "bg-line-strong"}`}>
+                    <span className={`absolute top-[3px] h-[22px] w-[22px] rounded-full bg-surface shadow-sm transition-all ${ap.enabled ? "left-[23px]" : "left-[3px]"}`} />
                   </button>
                   {ap.enabled ? "On" : "Paused"}
                 </label>
@@ -287,11 +291,11 @@ function Grant({ wallet, passkey, payable, initial, busy, disabled, onGrant }: {
         )}
       </fieldset>
       {cost && cost !== "error" && cost.registrationCelo > 0 && (
-        <p className={`mt-3 rounded-[6px] px-3 py-2 text-[12.5px] ${cost.celoBalance < cost.registrationCelo ? "bg-amber-wash text-amber" : "bg-paper-2 text-ink-2"}`}>
-          Setting this up costs about {cost.registrationCelo.toLocaleString("en-US", { maximumFractionDigits: 2 })} CELO once, plus a small network fee. It records subscan&rsquo;s access publicly so anyone can check it. {cost.celoBalance < cost.registrationCelo ? `Your Autopilot wallet has ${cost.celoBalance.toLocaleString("en-US", { maximumFractionDigits: 2 })} CELO.` : ""}
+        <p className={`mt-3 rounded-[12px] px-3 py-2 text-[12.5px] ${cost.celoBalance < cost.registrationCelo ? "bg-amber-wash text-amber" : "bg-paper-2 text-ink-2"}`}>
+          A new wallet&rsquo;s first action costs about {cost.registrationCelo.toLocaleString("en-US", { maximumFractionDigits: 2 })} CELO once, to register it on Celo, plus a small network fee. Later changes only cost the network fee. {cost.celoBalance < cost.registrationCelo ? `Your Autopilot wallet has ${cost.celoBalance.toLocaleString("en-US", { maximumFractionDigits: 2 })} CELO.` : ""}
         </p>
       )}
-      <p className="mt-3 rounded-[6px] bg-paper-2 px-3 py-2 text-[12.5px] text-ink-2">
+      <p className="mt-3 rounded-[12px] bg-paper-2 px-3 py-2 text-[12.5px] text-ink-2">
         You&rsquo;ll confirm with your passkey. Your wallet will only let subscan move dollars and naira, or convert them through Textile FX, up to these limits until the access expires. You can revoke it at any time.
       </p>
       <button className="btn btn-primary mt-3 w-full sm:w-auto" disabled={disabled || !(Number(usdt) >= 0) || !(Number(cngn) >= 0)} onClick={() => onGrant({ USDT: String(Number(usdt) || 0), cNGN: String(Number(cngn) || 0) }, days, recipients)}>

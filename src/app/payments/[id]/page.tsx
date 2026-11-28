@@ -57,7 +57,7 @@ export default function PaymentDetail() {
       </div>
 
       {s.status === "detected" && !s.manual && (
-        <div className="mt-4 rounded-[6px] border border-amber/30 bg-amber-wash px-3 py-3">
+        <div className="mt-4 rounded-[12px] border border-amber/30 bg-amber-wash px-3 py-3">
           <p className="text-[13.5px]"><span className="font-semibold">Not checked yet.</span> {LEVEL_LABEL[lv]}: {explain(s, fmt)}</p>
           <div className="mt-2.5 grid grid-cols-2 gap-2 sm:flex">
             <button className="btn btn-primary" onClick={() => setStatus("confirmed")}>Yes, I pay this</button>
@@ -66,7 +66,7 @@ export default function PaymentDetail() {
         </div>
       )}
       {s.status === "dismissed" && (
-        <div className="mt-4 flex items-center justify-between gap-3 rounded-[6px] bg-paper-2 px-3 py-2.5 text-[13.5px]">
+        <div className="mt-4 flex items-center justify-between gap-3 rounded-[12px] bg-paper-2 px-3 py-2.5 text-[13.5px]">
           <span>You said this isn&rsquo;t a regular payment.</span>
           <button className="btn btn-ghost btn-sm" onClick={() => setStatus("detected")}>Check again</button>
         </div>
@@ -107,7 +107,7 @@ export default function PaymentDetail() {
       ) : (
         <div className="mt-5 grid grid-cols-2 gap-2 sm:flex">
           <button className="btn btn-ghost" onClick={() => setEditing(true)}>Edit details</button>
-          <Link href={`/agent#bill-${encodeURIComponent(s.id)}`} className="btn btn-ghost">What the agent will do</Link>
+          <Link href={`/agent#bill-${encodeURIComponent(s.id)}`} className="btn btn-ghost">What subscan will do</Link>
           {s.status === "confirmed" && !s.manual && <button className="btn btn-quiet col-span-2 sm:ml-auto" onClick={() => { setStatus("dismissed"); router.push("/payments"); }}>Not a regular payment</button>}
           {s.manual && <button className="btn btn-quiet col-span-2 text-alert sm:ml-auto" onClick={() => { removeSubscription(s.id); router.push("/payments"); }}>Delete this payment</button>}
         </div>
@@ -126,7 +126,7 @@ export default function PaymentDetail() {
             <PaymentMethod s={s} onSave={(payment) => updateSubscription(s.id, { payment })} />
             {s.payment && <Link href={`/pay/${encodeURIComponent(s.id)}`} className="btn btn-primary w-full sm:w-auto">Review a payment</Link>}
             {s.payment?.address && (
-              <div className="flex flex-wrap items-center justify-between gap-2 rounded-[6px] border rule px-3 py-2.5 text-[13.5px]">
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-[12px] border rule px-3 py-2.5 text-[13.5px]">
                 {state.autopilot?.sealedPolicy && !state.autopilot.revokedAt ? (
                   state.autopilot.recipients.some((r) => r.address.toLowerCase() === s.payment!.address!.toLowerCase()) ? (
                     <label className="flex items-center gap-2"><input type="checkbox" className="accent-[var(--color-accent)]" checked={!!s.autopay} onChange={(e) => updateSubscription(s.id, { autopay: e.target.checked })} />Pay this automatically with Autopilot when it&rsquo;s due</label>
@@ -165,7 +165,7 @@ function Fact({ k, children }: { k: string; children: React.ReactNode }) {
 }
 
 function Notice({ tone, children }: { tone: "alert" | "amber"; children: React.ReactNode }) {
-  return <p className={`flex gap-2 rounded-[6px] px-3 py-2.5 text-[13px] ${tone === "alert" ? "bg-alert-wash text-alert" : "bg-amber-wash text-amber"}`}><Icon name="alert" size={16} className="mt-px shrink-0" /><span className="text-ink-2">{children}</span></p>;
+  return <p className={`flex gap-2 rounded-[12px] px-3 py-2.5 text-[13px] ${tone === "alert" ? "bg-alert-wash text-alert" : "bg-amber-wash text-amber"}`}><Icon name="alert" size={16} className="mt-px shrink-0" /><span className="text-ink-2">{children}</span></p>;
 }
 
 function PaymentMethod({ s, onSave }: { s: Subscription; onSave(p: PaymentTarget | undefined): void }) {
@@ -216,7 +216,7 @@ function PaymentMethod({ s, onSave }: { s: Subscription; onSave(p: PaymentTarget
           Most providers don&rsquo;t accept this yet. Only add payment details the provider has given you: we never guess where money goes.
         </p>
         {s.payment && (
-          <div className="mt-4 rounded-[6px] bg-accent-wash px-3 py-2.5 text-[13px]">
+          <div className="mt-4 rounded-[12px] bg-accent-wash px-3 py-2.5 text-[13px]">
             <div className="font-medium">{s.payment.method === "x402" ? "x402 endpoint" : "Direct transfer"} · {TOKENS[s.payment.token].display}</div>
             {s.payment.address && <a href={addressUrl(s.payment.address)} target="_blank" rel="noreferrer" className="font-mono text-[12px] link break-all">{s.payment.address}</a>}
             {s.payment.x402Url && <div className="font-mono text-[12px] break-all text-muted">{s.payment.x402Url}</div>}

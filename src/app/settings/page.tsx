@@ -36,7 +36,7 @@ export default function Settings() {
   return (
     <div>
       <PageBar title="Settings" sub="Your statements, currency, wallet and data" />
-      {saved && <p className="mx-4 mb-3 rounded-[6px] bg-accent-wash px-3 py-2 text-[13px] text-accent sm:mx-6 lg:mx-8" role="status">{saved}</p>}
+      {saved && <p className="mx-4 mb-3 rounded-[12px] bg-accent-wash px-3 py-2 text-[13px] text-accent sm:mx-6 lg:mx-8" role="status">{saved}</p>}
 
       <Section title="Your statements" note="We keep the transactions you saved, never the files.">
         {state.imports?.length ? (
@@ -102,7 +102,7 @@ export default function Settings() {
         {!confirmReset ? (
           <button className="btn btn-danger" onClick={() => setConfirmReset(true)}>Delete all my data</button>
         ) : (
-          <div className="rounded-[6px] border border-alert/30 bg-alert-wash px-3 py-3">
+          <div className="rounded-[12px] border border-alert/30 bg-alert-wash px-3 py-3">
             <p className="text-[13.5px]">This removes your statements, transactions and payments list from this device. Records of wallet payments you&rsquo;ve already made are kept.</p>
             <div className="mt-2.5 grid grid-cols-2 gap-2 sm:flex">
               <button className="btn btn-danger" onClick={() => { reset(); setConfirmReset(false); flash("Your data was deleted"); }}>Yes, delete it</button>
