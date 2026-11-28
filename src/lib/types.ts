@@ -11,7 +11,13 @@ export interface Recipient {
   createdAt: string;
   /** When the user confirmed this exact address. Unconfirmed recipients can't receive money. */
   confirmedAt?: string;
+  /** Where the money arrives (an exchange or a wallet). Older recipients: "celo_wallet". */
+  destination?: DestinationId;
+  /** Tokens this destination accepts on Celo, captured when the recipient was saved. */
+  tokens?: TokenSymbol[];
 }
+
+export type DestinationId = "quidax" | "minipay" | "busha" | "celo_wallet";
 
 /**
  * keep_min       keep at least `amount` of `token`; top up by converting from `fromToken`.
@@ -136,6 +142,4 @@ export interface AppState {
   rules: MoneyRule[];
   schedules: TransferSchedule[];
   activity: Activity[];
-  /** Set once when bill and statement data from an older version was cleared. */
-  legacyCleared?: string;
 }

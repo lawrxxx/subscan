@@ -15,9 +15,8 @@ interface LegacyPayment {
 }
 
 /**
- * Bring data from older versions forward. Bills, bank-statement transactions and
- * imports are dropped (that product is gone); confirmed on-chain payments are
- * kept as completed transfers so the history stays honest.
+ * Bring data from older versions forward. Data the app no longer uses is dropped;
+ * confirmed on-chain payments are kept as completed transfers so the history stays honest.
  */
 export function migrate(saved: Record<string, unknown> | null): AppState {
   if (!saved) return EMPTY;
@@ -32,15 +31,13 @@ export function migrate(saved: Record<string, unknown> | null): AppState {
     .filter((p) => p.status === "confirmed")
     .map((p) => {
       const hash = p.steps?.find((x) => x.kind === "settlement")?.hash ?? p.steps?.find((x) => x.hash)?.hash;
-      return { id: p.id, kind: "transfer" as const, status: "completed" as const, createdAt: p.createdAt, updatedAt: p.createdAt, key: `legacy:${p.id}`, token: p.destinationToken, amount: p.destinationAmount, recipient: p.recipient, recipientName: p.merchant, txHash: hash, note: "From an earlier version of subscan" };
+      return { id: p.id, kind: "transfer" as const, status: "completed" as const, createdAt: p.createdAt, updatedAt: p.createdAt, key: `legacy:${p.id}`, token: p.destinationToken, amount: p.destinationAmount, recipient: p.recipient, recipientName: p.merchant, txHash: hash, note: "Recorded before this update" };
     });
-  const hadLegacy = Array.isArray(saved.transactions) && (saved.transactions as unknown[]).length > 0 || Array.isArray(saved.subscriptions) && (saved.subscriptions as unknown[]).length > 0;
   return {
     ...EMPTY,
     settings: { payGasInUsdt: !!settings.payGasInUsdt, wallet: settings.wallet, agentId: settings.agentId, agentRegistrationTx: settings.agentRegistrationTx, displayName: settings.displayName },
     autopilot: old?.wallet ? { wallet: old.wallet, passkey: old.passkey, enabled: false, sealedPolicy: old.sealedPolicy, agentPublicKey: old.agentPublicKey, limits: old.limits ?? { USDT: "20", cNGN: "30000" }, expiry: old.expiry, grantTx: old.grantTx, grantedAt: old.grantedAt, revokedAt: old.revokedAt, revokeTx: old.revokeTx, templateVersion: 1 } : undefined,
     activity,
-    legacyCleared: hadLegacy ? new Date().toISOString() : undefined,
   };
 }
 

@@ -7,8 +7,8 @@ import "./globals.css";
 import { Providers } from "./providers";
 
 export const metadata: Metadata = {
-  title: "subscan · your money, made simple",
-  description: "See what you spend, which payments are coming up and where you could save.",
+  title: "subscan · your money, handled",
+  description: "Manage your stablecoins, set money rules and schedule transfers to wallets you trust.",
   icons: { icon: "/icon.svg" },
 };
 

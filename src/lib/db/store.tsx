@@ -23,7 +23,6 @@ interface Store {
   /** Insert or replace by id. A completed record is never downgraded. */
   upsertActivity(a: Activity): void;
   patchActivity(id: string, patch: Partial<Activity>): void;
-  dismissLegacyNotice(): void;
   reset(): void;
 }
 
@@ -113,7 +112,6 @@ export function StoreProvider({ children, adapter: given }: { children: ReactNod
           ...s,
           activity: s.activity.map((x) => (x.id !== id || (x.status === "completed" && patch.status && patch.status !== "completed") ? x : { ...x, ...patch, updatedAt: now() })),
         })),
-      dismissLegacyNotice: () => commit((s) => ({ ...s, legacyCleared: undefined })),
       reset: () => commit((s) => ({ ...EMPTY, settings: s.settings, autopilot: s.autopilot, activity: s.activity.filter((a) => a.txHash) })),
     }),
     [ready, state, commit],

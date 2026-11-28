@@ -4,6 +4,7 @@ import type { TokenSymbol } from "../celo/config.ts";
 import type { Activity, AppState, MoneyRule, Recipient, TransferSchedule } from "../types.ts";
 import { evaluateRule, transferCap, type Balances, type RuleNeed } from "./rules.ts";
 import { daysBetween, datesBetween, nextDate } from "./schedule.ts";
+import { tokensFor } from "./destinations.ts";
 
 /** A missed transfer is still sent automatically if it's at most this many days late. */
 export const GRACE_DAYS = 3;
@@ -60,6 +61,10 @@ export function plan(state: AppState, input: { today: string; nowMs: number; bal
       const limit = num(s.txLimit) || undefined;
       if (!recipient?.confirmedAt) {
         steps.push({ ...base, type: "block", why: "The recipient hasn't been confirmed." });
+        continue;
+      }
+      if (!tokensFor(recipient).includes(s.token)) {
+        steps.push({ ...base, type: "block", why: `${recipient.name}'s destination isn't known to accept this token on Celo.` });
         continue;
       }
       if (limit !== undefined && amount > limit) {

@@ -12,7 +12,7 @@ import type { Balances } from "@/lib/money/rules";
 import { describe } from "@/lib/money/schedule";
 
 export default function Home() {
-  const { state, ready, dismissLegacyNotice } = useStore();
+  const { state, ready } = useStore();
   const [bal, setBal] = useState<Balances | null>(null);
   const [rate, setRate] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -50,15 +50,9 @@ export default function Home() {
     <div className="px-4 pt-3 sm:px-6 lg:px-8 lg:pt-8">
       <header className="mb-4">
         <h1 className="title text-[26px] sm:text-[30px]">{greeting}</h1>
-        <p className="mt-1 text-[13.5px] text-muted">your money, rules and transfers in one place.</p>
+        <p className="mt-1 text-[13.5px] text-muted">manage your stablecoins, set money rules and schedule transfers to wallets you trust.</p>
       </header>
 
-      {state.legacyCleared && (
-        <div className="callout callout-sage mb-3 items-start">
-          <span className="min-w-0 text-[13px]"><span className="font-semibold">subscan has changed.</span> It now manages money in your payment wallet with rules and recurring transfers. Bank statements and bills from the earlier version were removed from this browser. Payments that went through on Celo are still in your activity.</span>
-          <button className="btn btn-quiet btn-sm shrink-0" onClick={dismissLegacyNotice}>OK</button>
-        </div>
-      )}
 
       {!ap?.wallet ? (
         <NoWallet />

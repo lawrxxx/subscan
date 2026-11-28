@@ -41,37 +41,3 @@ export function shortHash(h: string, n = 6) {
   return h.length > 2 * n + 2 ? `${h.slice(0, n + 2)}…${h.slice(-n)}` : h;
 }
 
-export const FREQ_LABEL = { weekly: "Weekly", monthly: "Monthly", quarterly: "Quarterly", yearly: "Yearly" } as const;
-export const PER = { weekly: "/wk", monthly: "/mo", quarterly: "/qtr", yearly: "/yr" } as const;
-
-/** Rewrites ISO dates inside generated text ("on 2026-08-03") as "on 3 Aug 2026". */
-export function readableDates(text: string) {
-  return text.replace(/\b(\d{4}-\d{2}-\d{2})\b/g, (d) => date(d));
-}
-
-/** Display name for a payee key such as "salary-credit" → "Salary Credit". */
-export function payeeName(merchant: string) {
-  if (!/^[a-z0-9-]+$/.test(merchant)) return merchant;
-  return merchant.split("-").filter(Boolean).map((w) => (w.length <= 3 && /\d/.test(w) ? w : w[0].toUpperCase() + w.slice(1))).join(" ");
-}
-
-/** A readable name for a statement line. Never returns a bare reference number. */
-export function txLabel(t: { merchant: string; description: string }) {
-  const name = payeeName(t.merchant);
-  const letters = name.replace(/[^A-Za-z]/g, "").length;
-  const digits = name.replace(/\D/g, "").length;
-  const looksLikeRef = letters < 3 || digits >= 4 || /[a-z]*\d+[a-z]+\d/i.test(name);
-  if (!looksLikeRef) return name;
-  if (/\b(nip|trf|transfer|tfr)\b/i.test(t.description)) return "Bank transfer";
-  if (/\b(pos|card|web)\b/i.test(t.description)) return "Card payment";
-  return "Unknown payee";
-}
-
-/** Short cadence for compact rows: "About once a month" -> "Monthly". Presentation only. */
-export function shortCadence(text: string | null | undefined): string | null {
-  if (!text) return null;
-  const t = text.replace(/^about\s+/i, "").toLowerCase();
-  const map: Record<string, string> = { "once a week": "weekly", "once a month": "monthly", "once a year": "yearly", "every three months": "quarterly", "every 3 months": "quarterly", "every two weeks": "every 2 weeks" };
-  const out = map[t] ?? t;
-  return out[0].toUpperCase() + out.slice(1);
-}

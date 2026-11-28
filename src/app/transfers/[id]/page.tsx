@@ -11,6 +11,7 @@ import { useStore } from "@/lib/db/store";
 import { date } from "@/lib/format";
 import { sentTotal } from "@/lib/money/plan";
 import { describe, nextDate, addDays } from "@/lib/money/schedule";
+import { destinationOf, tokensFor } from "@/lib/money/destinations";
 
 export default function ScheduleDetail() {
   const { id } = useParams<{ id: string }>();
@@ -38,7 +39,7 @@ export default function ScheduleDetail() {
         {editing ? (
           <>
             <p className="px-1 text-[12.5px] text-muted">The recipient can&rsquo;t be changed. To send to someone else, cancel this and schedule a new transfer.</p>
-            <ScheduleFields initial={s} lockStart={s.firstDate < today} submitLabel="Save changes" onBack={() => setEditing(false)} onSubmit={(d) => { set(d); setEditing(false); }} />
+            <ScheduleFields initial={s} tokens={r ? tokensFor(r) : [s.token]} lockStart={s.firstDate < today} submitLabel="Save changes" onBack={() => setEditing(false)} onSubmit={(d) => { set(d); setEditing(false); }} />
           </>
         ) : (
           <>
@@ -50,7 +51,7 @@ export default function ScheduleDetail() {
                 </div>
                 <span className={`pill ${s.status === "active" ? "pill-green" : s.status === "paused" ? "pill-amber" : ""}`}>{s.status}</span>
               </div>
-              {r && <div className="border-t rule px-4 py-3"><div className="mb-1.5 text-[12.5px] text-muted">{r.name}&rsquo;s address</div><AddressBlock address={r.address} /></div>}
+              {r && <div className="border-t rule px-4 py-3"><div className="mb-1.5 text-[12.5px] text-muted">{r.name} receives on {destinationOf(r).name} · {s.token === "USDT" ? "USD₮" : "cNGN"} on Celo</div><AddressBlock address={r.address} /></div>}
               <dl className="rows border-t rule text-[13.5px]">
                 <Row k="Started">{date(s.firstDate)}</Row>
                 <Row k="Ends">{s.frequency === "once" ? "After one transfer" : s.endDate ? date(s.endDate) : "When you cancel"}</Row>

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-test("older data: bills and statements dropped, confirmed payments kept as completed transfers", async () => {
+test("older data: unused data dropped, confirmed payments kept as completed transfers", async () => {
   // store.tsx is a client module; import the pure migrate() through a tiny shim.
   const { migrate } = await import("../src/lib/db/migrate.ts");
   const old = {
@@ -21,7 +21,6 @@ test("older data: bills and statements dropped, confirmed payments kept as compl
   assert.equal(s.activity[0].status, "completed");
   assert.equal(s.autopilot?.enabled, false, "automation starts paused after the upgrade");
   assert.equal(s.autopilot?.templateVersion, 1);
-  assert.ok(s.legacyCleared);
   assert.equal((s as unknown as Record<string, unknown>).subscriptions, undefined);
   assert.equal(s.settings.payGasInUsdt, true);
   assert.deepEqual(migrate(null).rules, []);

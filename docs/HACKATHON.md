@@ -51,7 +51,23 @@ failed with a warning to check the wallet before retrying.
 | Rule's maximum conversion vs the live firm quote | subscan server, before signing |
 | Max total, end date and per-transfer limit of a schedule | planner, before anything is sent |
 
-## 3. Limitations (stated in the product)
+## 3. Recipient destinations (`lib/money/destinations.ts`)
+
+Recipients are saved with where they receive money. Only token and network combinations shown in
+the provider's own documentation are offered; the user copies the deposit address from the app and
+pastes it (no exchange API, no scraping). Addresses are stored exactly as pasted, validated for
+format and checksum, and confirmed with name, destination, token and network before saving.
+
+| Destination | USD₮ on Celo | cNGN on Celo | Basis |
+| --- | --- | --- | --- |
+| Quidax | ✓ | ✗ (not listed) | Quidax developer docs, supported crypto assets: USDT · Celo network |
+| MiniPay | ✓ | ✗ (not confirmed) | Celo docs: MiniPay holds USDm, USDC and USD₮ |
+| Busha | ✗ | ✗ | Busha docs list USDT on Tron, Ethereum, BSC, Polygon (and Plasma); no Celo. Shown, not selectable |
+| Another Celo wallet | ✓ | ✓ | Any Celo address holds both; the user checks their app shows the token |
+
+The planner also blocks a scheduled token the recipient's destination doesn't accept.
+
+## 3b. Limitations (stated in the product)
 
 1. **No background execution.** No database or server-side store, so rules and transfers run only while subscan is open in a browser.
 2. **Recipient allowlist and per-transfer cap are off-chain** (server checks), by design of Altana's permission model.
