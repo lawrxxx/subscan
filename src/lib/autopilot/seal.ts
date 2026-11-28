@@ -2,14 +2,16 @@
 // The key is generated here, encrypted with AUTOPILOT_SEAL_KEY (AES-256-GCM)
 // and handed to the browser only in sealed form. The browser cannot use it,
 // the server keeps no copy, and a sealed blob is bound to its wallet.
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 
 function key(): Buffer {
   const raw = process.env.AUTOPILOT_SEAL_KEY;
   if (!raw) throw new AutopilotConfigError("AUTOPILOT_SEAL_KEY is not set");
-  const k = /^[0-9a-f]{64}$/i.test(raw) ? Buffer.from(raw, "hex") : Buffer.from(raw, "base64");
-  if (k.length !== 32) throw new AutopilotConfigError("AUTOPILOT_SEAL_KEY must be 32 bytes (64 hex characters or base64)");
-  return k;
+  // 64 hex characters are used as-is; anything else is treated as a passphrase
+  // (at least 32 characters) and stretched to a 32-byte key with SHA-256.
+  if (/^[0-9a-f]{64}$/i.test(raw)) return Buffer.from(raw, "hex");
+  if (raw.length < 32) throw new AutopilotConfigError("AUTOPILOT_SEAL_KEY must be at least 32 characters");
+  return createHash("sha256").update(`subscan-autopilot-v1:${raw}`).digest();
 }
 
 export class AutopilotConfigError extends Error {}

@@ -64,3 +64,10 @@ test("sealed agent key opens only with the right secret and wallet", () => {
   process.env.AUTOPILOT_SEAL_KEY = randomBytes(32).toString("hex");
   assert.throws(() => unseal(s, "0xwallet"));
 });
+
+test("a long passphrase works as the seal secret; a short one is refused", () => {
+  process.env.AUTOPILOT_SEAL_KEY = "correct horse battery staple violet river 42";
+  assert.deepEqual(unseal(seal({ ok: 1 }, "w"), "w"), { ok: 1 });
+  process.env.AUTOPILOT_SEAL_KEY = "too short";
+  assert.throws(() => seal({}, "w"), /at least 32 characters/);
+});
