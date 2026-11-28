@@ -14,8 +14,9 @@ const dir = process.argv[2];
 const keys = JSON.parse(readFileSync(`${dir}/keys.json`, "utf8"));
 keys.recipient ??= generatePrivateKey();
 keys.agent2 ??= generatePrivateKey();
+keys.seal ??= randomBytes(32).toString("hex");
+process.env.AUTOPILOT_SEAL_KEY ??= keys.seal;
 writeFileSync(`${dir}/keys.json`, JSON.stringify(keys), { mode: 0o600 });
-process.env.AUTOPILOT_SEAL_KEY ??= randomBytes(32).toString("hex");
 const server = await import("../src/lib/autopilot/server.ts");
 const { requestFirm } = await import("../src/lib/textile/client.ts");
 
@@ -42,12 +43,12 @@ const expectReject = async (step: string, run: () => Promise<{ status?: string; 
 };
 
 console.log("wallet", wallet.address, "recipient", recipient);
-const limits = { USDT: "1", cNGN: "800" };
+const limits = { USDT: "2", cNGN: "1600" }; // Textile's minimum order is ~1,440 cNGN
 
 // 1. Grant
 const key = server.issueKey(wallet.address as `0x${string}`);
 const agentSigner = signerFromPrivateKey(keys.agent);
-const grant = await client.grantSession({ wallet, signer: admin, permissions: autopilotPermissions(limits), expiry: Math.floor(Date.now() / 1000) + 3600, sessionSigner: { ...agentSigner, publicKey: key.publicKey, signDigest: async () => { throw new Error("public only"); } }, chainId: 42220, feeToken: TOKENS.USDT.address });
+const grant = await client.grantSession({ wallet, signer: admin, permissions: autopilotPermissions(limits), expiry: Math.floor(Date.now() / 1000) + 3600, sessionSigner: { ...agentSigner, publicKey: key.publicKey, signDigest: async () => { throw new Error("public only"); } }, chainId: 42220, feeToken: TOKENS.USDT.address, register: false });
 const grantTx = (grant as { transactionHash?: Hex }).transactionHash;
 out("1. grant session (calls allowlist + monthly caps + 1h expiry)", grant.status === "granted", { grantTx, keyHash: grant.keyHash, agentIdentity: (grant as { agentIdentity?: unknown }).agentIdentity });
 const serialized = serializeSession(grant);
@@ -65,19 +66,17 @@ const pay2 = await server.pay({ sealedPolicy: act.sealedPolicy, wallet: wallet.a
 out("3. unapproved recipient refused by subscan before signing", !pay2.ok && !!pay2.refusals?.includes("recipient_not_approved"), { refusals: pay2.refusals });
 
 // For direct on-chain checks, act with the session key itself (bypassing subscan's checks on purpose).
-const session = deserializeSession(serialized, signerFromPrivateKey(JSON.parse(JSON.stringify({ k: keys.agent })).k));
-void session;
 const sealedSession = deserializeSession(serialized, signerFromPrivateKey((await import("../src/lib/autopilot/seal.ts")).unseal<{ key: Hex }>(act.sealedPolicy, wallet.address.toLowerCase()).key));
 
 // 4. Over the cap: enforced by the account contract
-await expectReject("4. over the monthly cap (1.5 USD₮ > 1 USD₮) rejected on-chain", () => client.execute({ session: sealedSession, chainId: 42220, calls: [transfer("USDT", recipient, usdt("1.5"))], feeToken: TOKENS.USDT.address }));
+await expectReject("4. over the monthly cap (2.5 USD₮ > 2 USD₮) rejected on-chain", () => client.execute({ session: sealedSession, chainId: 42220, calls: [transfer("USDT", recipient, usdt("2.5"))], feeToken: TOKENS.USDT.address }));
 
 // 5. Outside the call allowlist: cNGN.approve is not granted
 await expectReject("5. call outside the allowlist (cNGN.approve) rejected on-chain", () => client.execute({ session: sealedSession, chainId: 42220, calls: [{ to: TOKENS.cNGN.address, data: encodeFunctionData({ abi: erc20Abi, functionName: "approve", args: [recipient, 1n] }), value: 0n }], feeToken: TOKENS.USDT.address }));
 
 // 6. Textile FX conversion inside the session: approve + swap + pay cNGN, one atomic batch.
 try {
-  const buy = "100000000"; // 100 cNGN
+  const buy = "1450000000"; // 1,450 cNGN (above Textile's minimum)
   let firm;
   try {
     firm = await requestFirm({ sellToken: "USDT", buyToken: "cNGN", buyAmount: buy }, wallet.address as `0x${string}`);
@@ -106,13 +105,13 @@ try {
     t2 = parseAttribution((await pub.getTransaction({ hash: r.transactionHash })).input);
     await (await import("../src/lib/textile/client.ts")).submit(firm.rfqId, firm.claimToken, r.transactionHash).catch(() => {});
   }
-  out("6b. convert USD₮→cNGN on Textile and pay 100 cNGN, one session transaction", r.status === "CONFIRMED", { tx: r.transactionHash, attribution: t2 });
+  out("6b. convert USD₮→cNGN on Textile and pay 1,450 cNGN, one session transaction", r.status === "CONFIRMED", { tx: r.transactionHash, attribution: t2 });
 } catch (e) {
   out("6. Textile conversion inside the session", false, { error: (e as Error).message.slice(0, 300) });
 }
 
 // 7. Expiry: a second session that lives 2 minutes
-const s2 = await client.grantSession({ wallet, signer: admin, permissions: autopilotPermissions(limits), expiry: Math.floor(Date.now() / 1000) + 120, sessionSigner: signerFromPrivateKey(keys.agent2), chainId: 42220, feeToken: TOKENS.USDT.address });
+const s2 = await client.grantSession({ wallet, signer: admin, permissions: autopilotPermissions(limits), expiry: Math.floor(Date.now() / 1000) + 120, sessionSigner: signerFromPrivateKey(keys.agent2), chainId: 42220, feeToken: TOKENS.USDT.address, register: false });
 out("7a. short-lived session granted (expires in 2 min)", s2.status === "granted", { tx: (s2 as { transactionHash?: Hex }).transactionHash });
 console.log("waiting for expiry…");
 await new Promise((r) => setTimeout(r, 150_000));

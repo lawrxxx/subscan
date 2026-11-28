@@ -86,7 +86,7 @@ export async function grant(opts: { wallet: `0x${string}`; passkey?: Passkey; li
   // Only the public key is needed to grant; the private key stays sealed on subscan's server.
   const agent: Signer = { type: "privateKey", address: key.address, publicKey: key.publicKey, signDigest: async () => { throw new Error("subscan's agent key signs on the server only"); } };
   const expiry = Math.floor(Date.now() / 1000) + opts.days * 86_400;
-  const result = await withTimeout(client().grantSession({ wallet, signer, permissions: autopilotPermissions(opts.limits), expiry, sessionSigner: agent, chainId: 42220 }), 150_000, "Giving access");
+  const result = await withTimeout(client().grantSession({ wallet, signer, permissions: autopilotPermissions(opts.limits), expiry, sessionSigner: agent, chainId: 42220, register: false }), 150_000, "Giving access");
   if (result.status !== "granted") throw new Error(result.legs.find((l) => l.status === "FAILED")?.reason ?? "The wallet didn't authorise subscan.");
   const session = serializeSession(result);
   const tx = (result as { transactionHash?: Hex }).transactionHash ?? result.legs.find((l) => l.kind === "account")?.transactionHash;
@@ -99,7 +99,7 @@ export async function quoteGrant(opts: { wallet: `0x${string}`; passkey?: Passke
   if (!opts.passkey) return null;
   const signer = signerFromPasskey(opts.passkey);
   const probe = signerFromPrivateKey(generatePrivateKey()); // a stand-in key, only to price the call
-  const q = await client().quoteGrantSession({ wallet: { address: opts.wallet }, signer, permissions: autopilotPermissions(opts.limits), expiry: Math.floor(Date.now() / 1000) + opts.days * 86_400, sessionSigner: probe, chainId: 42220 });
+  const q = await client().quoteGrantSession({ wallet: { address: opts.wallet }, signer, permissions: autopilotPermissions(opts.limits), expiry: Math.floor(Date.now() / 1000) + opts.days * 86_400, sessionSigner: probe, chainId: 42220, register: false });
   const registration = q.lines.reduce((x, l) => x + l.value, 0n);
   return {
     registrationCelo: Number(formatUnits(registration, 18)),
