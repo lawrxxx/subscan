@@ -134,8 +134,8 @@ Evidence (hashes) is written to the session's evidence file and will be added he
 ## 9. Outstanding blockers
 
 1. **Test wallet unfunded**: live Altana + combined tests cannot run until it holds ≈ 20 CELO + a few USD₮.
-2. **`AUTOPILOT_SEAL_KEY` not set on Vercel**: the live site shows "Autopilot isn't switched on" until it is.
-3. **`TEXTILE_API_KEY` not set**: Autopilot conversions from passkey wallets need it.
+2. **`AUTOPILOT_SEAL_KEY`**: added on Vercel by the owner (28 Nov); confirm `/api/autopilot` reports `available: true` after each deploy.
+3. **`TEXTILE_API_KEY`**: only a testnet key is available to the owner, which Textile rejects on Celo mainnet, so it is deliberately not set. Manual conversions work keyless; Autopilot pays in the currency the wallet holds and refuses conversions honestly.
 4. **ERC-8004 id for subscan itself** not registered/recorded yet (Autopilot wallets self-register via the SDK).
 5. Altana recipient allowlist is off-chain by design of the permission model (documented).
 6. Autopilot runs when the user opens subscan (browser storage only, no server database); there is no background scheduler.
