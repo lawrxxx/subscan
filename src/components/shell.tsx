@@ -16,7 +16,7 @@ const NAV = [
 function isActive(path: string, href: string) {
   if (href === "/") return path === "/";
   if (href === "/payments") return path.startsWith("/payments") || path.startsWith("/pay");
-  if (href === "/settings") return path.startsWith("/settings") || path.startsWith("/wallet");
+  if (href === "/settings") return path.startsWith("/settings") || path.startsWith("/wallet") || path.startsWith("/autopilot");
   return path.startsWith(href);
 }
 

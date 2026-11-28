@@ -16,6 +16,7 @@
     "env:verify": "node scripts/vercel-env.mjs verify"
   },
   "dependencies": {
+    "@altananetwork/sdk": "1.2.0",
     "@celo/attribution-tags": "^0.7.0",
     "@fontsource-variable/newsreader": "^5.3.0",
     "@fontsource/ibm-plex-mono": "^5.3.0",

@@ -10,11 +10,15 @@ import { displayLabel, predictedNext, rawDescription } from "@/lib/review";
 import { historyDays, spendingSummary } from "@/lib/spending";
 import type { Subscription } from "@/lib/types";
 import { EmptyPanel, Icon, PageBar, Stat, UploadButton } from "@/components/ui";
+import { useAutopilotRunner } from "@/lib/autopilot/runner";
 
 const DAY = 86_400_000;
 
 export default function Home() {
-  const { state, ready } = useStore();
+  const store = useStore();
+  const { state, ready } = store;
+  const [autoNotes, setAutoNotes] = useState<string[]>([]);
+  useAutopilotRunner(store, (m) => setAutoNotes((n) => [...n, m]));
   const home = state.settings.homeCurrency;
   const { rates } = useRates(home);
   const today = new Date().toISOString().slice(0, 10);
@@ -56,6 +60,13 @@ export default function Home() {
       />
 
       <div className="space-y-4 px-4 sm:px-6 lg:px-8">
+        {autoNotes.length > 0 && (
+          <section className="rounded-[6px] border rule bg-surface px-4 py-3 text-[13.5px]" aria-live="polite">
+            <div className="font-semibold">Autopilot</div>
+            <ul className="mt-1 space-y-0.5 text-ink-2">{autoNotes.map((m, i) => <li key={i}>{m}</li>)}</ul>
+            <Link href="/autopilot" className="mt-1 inline-block text-[12.5px] text-muted underline">See Autopilot</Link>
+          </section>
+        )}
         {toCheck.length > 0 && (
           <Link href="/review" className="flex items-center justify-between gap-3 rounded-[6px] border border-amber/30 bg-amber-wash px-4 py-3 text-[14px] hover:border-amber/60">
             <span><span className="font-semibold">We found {toCheck.length} payment{toCheck.length === 1 ? "" : "s"} to check.</span> <span className="text-ink-2">Confirm the real ones so your totals are right.</span></span>

@@ -74,6 +74,8 @@ export interface Subscription {
   manual?: boolean; // added by the user rather than detected
   payment?: PaymentTarget;
   edited?: boolean;
+  /** Let Autopilot pay this bill when it's due, within the user's limits. */
+  autopay?: boolean;
 }
 
 export type PaymentStepKind = "approval" | "conversion" | "settlement";
@@ -105,6 +107,40 @@ export interface PaymentRecord {
   steps: PaymentStep[];
   status: PaymentStatus;
   from?: `0x${string}`;
+  /** "autopilot" = sent by subscan's agent from the Altana wallet under the user's session. */
+  via?: "wallet" | "autopilot";
+  /** One payment per bill per due date. */
+  idempotencyKey?: string;
+  /** Payment engine stage, for autopilot payments. */
+  stage?: "detected" | "prepared" | "quoted" | "converted" | "submitted" | "confirmed" | "failed";
+  /** Why the agent stopped, in plain words. */
+  refusals?: string[];
+}
+
+export interface AutopilotRecipient {
+  address: `0x${string}`;
+  label: string;
+  billId?: string;
+}
+
+export interface AutopilotState {
+  /** The user's non-custodial Altana smart wallet (passkey admin). */
+  wallet: `0x${string}`;
+  /** The passkey's public credential (id + public key; nothing secret), to sign again on this device. */
+  passkey?: { kind: "webauthn"; id: string; publicKey: `0x${string}`; rpId?: string };
+  enabled: boolean;
+  /** Sealed access token from subscan's server (opaque to the browser). */
+  sealedPolicy?: string;
+  /** Sealed agent key waiting for the grant (between steps). */
+  sealedKey?: string;
+  agentPublicKey?: `0x${string}`;
+  limits: { USDT: string; cNGN: string };
+  recipients: AutopilotRecipient[];
+  expiry?: number; // unix seconds
+  grantTx?: `0x${string}`;
+  grantedAt?: string;
+  revokedAt?: string;
+  revokeTx?: `0x${string}`;
 }
 
 export interface AppSettings {
@@ -128,6 +164,7 @@ export interface AppState {
   imports?: ImportRecord[];
   /** Actions the user approved from the agent workspace (newest first). */
   actions?: AgentAction[];
+  autopilot?: AutopilotState;
 }
 
 export interface ImportRecord {

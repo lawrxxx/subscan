@@ -125,6 +125,19 @@ export default function PaymentDetail() {
           <div className="mt-3 space-y-3">
             <PaymentMethod s={s} onSave={(payment) => updateSubscription(s.id, { payment })} />
             {s.payment && <Link href={`/pay/${encodeURIComponent(s.id)}`} className="btn btn-primary w-full sm:w-auto">Review a payment</Link>}
+            {s.payment?.address && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-[6px] border rule px-3 py-2.5 text-[13.5px]">
+                {state.autopilot?.sealedPolicy && !state.autopilot.revokedAt ? (
+                  state.autopilot.recipients.some((r) => r.address.toLowerCase() === s.payment!.address!.toLowerCase()) ? (
+                    <label className="flex items-center gap-2"><input type="checkbox" className="accent-[var(--color-accent)]" checked={!!s.autopay} onChange={(e) => updateSubscription(s.id, { autopay: e.target.checked })} />Pay this automatically with Autopilot when it&rsquo;s due</label>
+                  ) : (
+                    <><span>Autopilot can pay this once you approve the recipient.</span><Link href="/autopilot" className="btn btn-ghost btn-sm">Approve in Autopilot</Link></>
+                  )
+                ) : (
+                  <><span>Want subscan to pay this for you automatically?</span><Link href="/autopilot" className="btn btn-ghost btn-sm">Set up Autopilot</Link></>
+                )}
+              </div>
+            )}
             {records.length > 0 && (
               <ul className="divide-y divide-[var(--color-rule-soft)] border-y rule-soft">
                 {records.map((p) => (

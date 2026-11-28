@@ -72,6 +72,13 @@ export default function Settings() {
         </div>
       </Section>
 
+      <Section title="Autopilot" note="Let subscan pay chosen bills automatically, within limits you set.">
+        <div className="flex flex-wrap items-center justify-between gap-3 text-[13.5px]">
+          <span>{state.autopilot?.sealedPolicy && !state.autopilot.revokedAt ? (state.autopilot.enabled ? "On" : "Paused") : "Off"}</span>
+          <Link href="/autopilot" className="btn btn-ghost">{state.autopilot?.sealedPolicy && !state.autopilot.revokedAt ? "Manage Autopilot" : "Set up Autopilot"}</Link>
+        </div>
+      </Section>
+
       <Section title="Wallet" note="Only needed if you want to pay a bill from a digital wallet. subscan never holds your money.">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="text-[13.5px]">

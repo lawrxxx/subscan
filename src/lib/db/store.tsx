@@ -6,7 +6,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { detectSubscriptions, mergeWithPrevious } from "../detection/engine";
 import { mergeTransactions, rowsToTransactions } from "../import/normalise";
 import type { ExtractedRow } from "../import/types";
-import type { AgentAction, AppSettings, AppState, ImportRecord, PaymentRecord, Subscription } from "../types";
+import type { AgentAction, AppSettings, AppState, AutopilotState, ImportRecord, PaymentRecord, Subscription } from "../types";
 import { browserStorage, purgeLegacyKeys, USER_KEY, type StorageAdapter } from "./storage";
 
 const EMPTY: AppState = {
@@ -62,6 +62,7 @@ interface Store {
   upsertPayment(p: PaymentRecord): void;
   removePayment(id: string): void;
   logAction(a: Omit<AgentAction, "id" | "at">): void;
+  setAutopilot(patch: Partial<AutopilotState> | null): void;
   reset(): void;
 }
 
@@ -151,12 +152,15 @@ export function StoreProvider({ children, adapter: given }: { children: ReactNod
       removePayment(id) {
         commit((s) => ({ ...s, payments: s.payments.filter((x) => x.id !== id || x.status !== "prepared") }));
       },
+      setAutopilot(patch) {
+        commit((s) => ({ ...s, autopilot: patch === null ? undefined : ({ ...(s.autopilot ?? {}), ...patch } as AutopilotState) }));
+      },
       logAction(a) {
         commit((s) => ({ ...s, actions: [{ ...a, id: `act_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, at: new Date().toISOString() }, ...(s.actions ?? [])].slice(0, 100) }));
       },
       reset() {
         // Keep preferences and records of on-chain payments; drop imports, bills and drafts.
-        commit((s) => ({ ...EMPTY, settings: s.settings, payments: s.payments.filter((p) => p.status !== "prepared") }));
+        commit((s) => ({ ...EMPTY, settings: s.settings, payments: s.payments.filter((p) => p.status !== "prepared"), autopilot: s.autopilot }));
       },
     };
   }, [ready, adapter.kind, state, commit]);

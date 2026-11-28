@@ -404,6 +404,37 @@ export const TOOLS: ToolDef[] = [
       return { payments: out, note: out.length ? undefined : "No payments recorded yet." };
     },
   },
+  {
+    name: "autopilot_check",
+    description:
+      "Explain Autopilot (automatic bill payments from the user's Altana wallet): whether it is on, when access expires, the monthly limits, approved recipients, and for each bill marked to pay automatically whether it would be paid when due and, if not, why. Read-only: it never pays. Balance and remaining monthly allowance are re-checked on-chain by the server at payment time.",
+    input_schema: { type: "object", properties: { ref: { type: "string", description: "Optional bill id or name to check" } }, required: [], additionalProperties: false },
+    run: async (input, { state, today }) => {
+      const ap = state.autopilot;
+      if (!ap?.wallet) return { set_up: false, note: "Autopilot isn't set up. The user can turn it on in Settings → Autopilot." };
+      const now = Date.now() / 1000;
+      const active = !!ap.sealedPolicy && !ap.revokedAt && (ap.expiry ?? 0) > now;
+      const bills = state.subscriptions.filter((s) => (input.ref ? s === findSub(state, input.ref) : s.autopay) && s.status !== "dismissed");
+      return {
+        set_up: true,
+        on: active && ap.enabled,
+        access: ap.revokedAt ? "revoked" : !ap.sealedPolicy ? "not granted" : (ap.expiry ?? 0) <= now ? "expired" : "active",
+        expires: ap.expiry ? new Date(ap.expiry * 1000).toISOString().slice(0, 10) : null,
+        monthly_limits: { USDT: ap.limits.USDT, cNGN: ap.limits.cNGN },
+        approved_recipients: ap.recipients.map((r) => r.label),
+        bills: bills.map((s) => {
+          const reasons: string[] = [];
+          if (!s.autopay) reasons.push("not switched to pay automatically");
+          if (!s.payment?.address) reasons.push("no verified wallet address for this provider");
+          else if (!ap.recipients.some((r) => r.address.toLowerCase() === s.payment!.address!.toLowerCase())) reasons.push("recipient not approved");
+          if (!active) reasons.push(`access ${ap.revokedAt ? "revoked" : "not active"}`);
+          else if (!ap.enabled) reasons.push("Autopilot is paused");
+          return { name: s.displayName, amount: s.amount, currency: s.currency, next_due: s.nextRenewal, will_pay_when_due: reasons.length === 0, why_not: reasons, note: reasons.length ? undefined : "Balance and remaining monthly allowance are checked on-chain at payment time." };
+        }),
+        today,
+      };
+    },
+  },
 ];
 
 export function toolByName(name: string) {

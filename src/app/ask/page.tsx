@@ -34,6 +34,7 @@ const TOOL_LABEL: Record<string, string> = {
   spending_breakdown: "Spending by category",
   income_and_payday: "Your income and payday",
   savings_analysis: "Possible savings",
+  autopilot_check: "Your Autopilot settings",
 };
 
 type Availability = { available: boolean; model?: string } | null;
@@ -44,6 +45,7 @@ function snapshot(state: AppState): AppState {
   return {
     ...state,
     imports: undefined,
+    autopilot: state.autopilot ? { ...state.autopilot, sealedPolicy: state.autopilot.sealedPolicy ? "set" : undefined, sealedKey: undefined } : undefined,
     transactions: state.transactions.slice(-2000).map((t) => ({ id: t.id, date: t.date, description: t.description, merchant: t.merchant, amount: t.amount, currency: t.currency, direction: t.direction, source: t.source })),
     subscriptions: state.subscriptions.map((s) => ({ ...s, history: s.history.slice(-12) })),
   };
