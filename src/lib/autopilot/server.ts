@@ -1,7 +1,7 @@
-// Autopilot on the server: the agent's side of an Altana session.
+// The payment wallet on the server: subscan's side of an Altana session.
 // It never holds an admin key. It holds (sealed) a session key the user's own
-// passkey wallet authorised with on-chain limits, and it re-checks those limits
-// plus the user's approved recipients before anything is sent.
+// passkey wallet authorised with on-chain limits, and before anything is sent it
+// re-checks those limits plus the user's saved recipients and per-transfer cap.
 import {
   accountHasKey,
   CELO,
@@ -15,12 +15,13 @@ import {
   type SerializedSession,
   type Session,
 } from "@altananetwork/sdk";
-import { createPublicClient, encodeFunctionData, erc20Abi, http, type Hex } from "viem";
+import { createPublicClient, encodeFunctionData, erc20Abi, http, parseUnits, toHex, type Hex } from "viem";
+import { randomBytes } from "node:crypto";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { CHAIN, RPC_URL, TEXTILE, TOKENS, type TokenSymbol } from "../celo/config.ts";
-import { checkAutopay, idempotencyKey, type ApprovedRecipient, type AutopayContext, type AutopayRequest, type Refusal } from "../payments/engine.ts";
-import { requestFirm, submit as textileSubmit, TextileError, type FirmQuote } from "../textile/client.ts";
-import { AUTOPILOT_APP_CODES, autopilotPermissions, type AutopilotLimits } from "./permissions.ts";
+import { checkConversion, checkTransfer, type ApprovedRecipient, type CheckContext, type Refusal } from "../payments/engine.ts";
+import { requestFirm, submit as textileSubmit, TextileError, type FirmQuote, type TakerProof } from "../textile/client.ts";
+import { AUTOPILOT_APP_CODES, autopilotPermissions, TEMPLATE_VERSION, type AutopilotLimits } from "./permissions.ts";
 import { seal, unseal } from "./seal.ts";
 
 const chain = createPublicClient({ chain: CHAIN, transport: http(RPC_URL) });
@@ -44,8 +45,22 @@ export interface Policy {
   session: SerializedSession;
   recipients: ApprovedRecipient[];
   limits: AutopilotLimits;
+  /** Largest single automated transfer or conversion, whole token units. */
+  maxPerTransfer?: Partial<AutopilotLimits>;
+  templateVersion?: number;
   issuedAt: number;
 }
+
+const cleanRecipients = (rs: ApprovedRecipient[]) =>
+  (Array.isArray(rs) ? rs : [])
+    .filter((r) => r && /^0x[0-9a-fA-F]{40}$/.test(r.address))
+    .map((r) => ({ address: r.address, label: String(r.label ?? "").slice(0, 60) }))
+    .slice(0, 50);
+const cleanMax = (m: Partial<AutopilotLimits> | undefined): Partial<AutopilotLimits> => {
+  const out: Partial<AutopilotLimits> = {};
+  for (const t of ["USDT", "cNGN"] as const) if (m?.[t] && /^\d+(\.\d+)?$/.test(m[t]!)) out[t] = m[t];
+  return out;
+};
 
 /** Step 1: a fresh agent key for this user. Only its public half leaves the server in clear. */
 export function issueKey(wallet: `0x${string}`) {
@@ -64,7 +79,7 @@ function sameJson(a: unknown, b: unknown) {
  * wallet now holds this key, that it was granted exactly the Autopilot template,
  * then seal the key together with the user's approved recipients.
  */
-export async function activate(input: { sealedKey: string; session: SerializedSession; recipients: ApprovedRecipient[]; limits: AutopilotLimits }) {
+export async function activate(input: { sealedKey: string; session: SerializedSession; recipients: ApprovedRecipient[]; limits: AutopilotLimits; maxPerTransfer?: Partial<AutopilotLimits> }) {
   const wallet = input.session.walletAddress;
   const { key } = unseal<KeyGrant>(input.sealedKey, wallet.toLowerCase());
   const signer = signerFromPrivateKey(key);
@@ -73,15 +88,14 @@ export async function activate(input: { sealedKey: string; session: SerializedSe
   if (!sameJson(expected, input.session.permissions)) throw new Error("The granted permissions don't match Autopilot's limits.");
   const keyHash = keyHashForSessionOrKey(signer.publicKey);
   if (!(await accountHasKey(reader, wallet, keyHash))) throw new Error("Your wallet hasn't authorised subscan's key on Celo yet.");
-  const recipients = input.recipients.filter((r) => /^0x[0-9a-fA-F]{40}$/.test(r.address)).slice(0, 25);
-  const policy: Policy = { v: 1, kind: "policy", key, session: input.session, recipients, limits: input.limits, issuedAt: Math.floor(Date.now() / 1000) };
+  const policy: Policy = { v: 1, kind: "policy", key, session: input.session, recipients: cleanRecipients(input.recipients), limits: input.limits, maxPerTransfer: cleanMax(input.maxPerTransfer), templateVersion: TEMPLATE_VERSION, issuedAt: Math.floor(Date.now() / 1000) };
   return { sealedPolicy: seal(policy, wallet.toLowerCase()), keyHash };
 }
 
-/** Re-seal with a new approved-recipient list (only the holder of the sealed policy can do this). */
-export function updateRecipients(sealedPolicy: string, wallet: `0x${string}`, recipients: ApprovedRecipient[]) {
+/** Re-seal with new saved recipients and per-transfer caps (only the holder of the sealed policy can do this). */
+export function updatePolicy(sealedPolicy: string, wallet: `0x${string}`, patch: { recipients?: ApprovedRecipient[]; maxPerTransfer?: Partial<AutopilotLimits> }) {
   const p = unseal<Policy>(sealedPolicy, wallet.toLowerCase());
-  return seal({ ...p, recipients: recipients.slice(0, 25) }, wallet.toLowerCase());
+  return seal({ ...p, ...(patch.recipients ? { recipients: cleanRecipients(patch.recipients) } : {}), ...(patch.maxPerTransfer ? { maxPerTransfer: cleanMax(patch.maxPerTransfer) } : {}) }, wallet.toLowerCase());
 }
 
 function openPolicy(sealedPolicy: string, wallet: `0x${string}`) {
@@ -112,105 +126,120 @@ export async function status(sealedPolicy: string, wallet: `0x${string}`) {
     onchainExpiry,
     recipients: policy.recipients,
     limits: policy.limits,
+    maxPerTransfer: policy.maxPerTransfer ?? {},
+    templateVersion: policy.templateVersion ?? 1,
     balances: { USDT: usdt.toString(), cNGN: cngn.toString() },
     remaining: { USDT: rUsdt.toString(), cNGN: rCngn.toString() },
   };
 }
 
-// Best-effort duplicate guard within one server instance. The browser also
-// records the idempotency key, and the on-chain cap bounds any repeat.
+// Best-effort duplicate guard within one server instance. The browser records
+// each movement's key before it asks, and the on-chain cap bounds any repeat.
 const inFlight = new Set<string>();
 
-export interface PayResult {
+export type ExecuteRequest =
+  | { kind: "transfer"; key: string; token: TokenSymbol; amountAtomic: string; recipient: `0x${string}` }
+  | { kind: "convert"; key: string; sellToken: TokenSymbol; buyToken: TokenSymbol; buyAmountAtomic?: string; sellAmountAtomic?: string; maxSellAtomic?: string };
+
+export interface ExecuteResult {
   ok: boolean;
+  status: "refused" | "processing" | "completed" | "failed";
   refusals?: Refusal[];
-  stage: "prepared" | "quoted" | "submitted" | "confirmed" | "failed";
   transactionHash?: Hex;
-  callsId?: Hex;
-  quote?: { rfqId: string; sell: string; buy: string; takerPays: string; feeAmount: string; rateRay: string; expiresAt: string };
-  source: TokenSymbol;
+  quote?: { rfqId: string; sellToken: TokenSymbol; buyToken: TokenSymbol; sellAmount: string; buyAmount: string; takerPays: string; feeAmount: string; expiresAt: string };
   error?: string;
-  idempotencyKey: string;
+  key: string;
+}
+
+async function context(policy: Policy, session: Session, wallet: `0x${string}`, key: string): Promise<CheckContext> {
+  const keyHash = keyHashForSessionOrKey(session.publicKey);
+  const [authorized, bU, bN, rU, rN] = await Promise.all([accountHasKey(reader, wallet, keyHash), balanceOf("USDT", wallet), balanceOf("cNGN", wallet), remainingOf(session, "USDT"), remainingOf(session, "cNGN")]);
+  const max: CheckContext["maxPerTransfer"] = {};
+  for (const t of ["USDT", "cNGN"] as const) if (policy.maxPerTransfer?.[t]) max[t] = parseUnits(policy.maxPerTransfer[t]!, TOKENS[t].decimals);
+  return { now: Math.floor(Date.now() / 1000), expiry: policy.session.expiry, keyAuthorized: authorized, maxPerTransfer: max, remaining: { USDT: rU, cNGN: rN }, balances: { USDT: bU, cNGN: bN }, alreadyDone: inFlight.has(key) };
 }
 
 /**
- * The shared engine's autonomous path:
- * validate → (Textile firm quote if the bill needs another token) → one atomic
- * Altana batch [approve, swap, transfer] or [transfer] → wait for the receipt.
+ * Proof for a keyless Textile quote that this wallet is the taker, signed by the
+ * session key through the wallet's ERC-1271 check. Textile may not accept it for
+ * every wallet; if it doesn't, the conversion is refused and nothing moves.
  */
-export async function pay(input: { sealedPolicy: string; wallet: `0x${string}`; request: Omit<AutopayRequest, "amountAtomic"> & { amountAtomic: string }; enabled: boolean; alreadyPaid: boolean }): Promise<PayResult> {
-  const { policy, session } = openPolicy(input.sealedPolicy, input.wallet);
-  const req: AutopayRequest = { ...input.request, amountAtomic: BigInt(input.request.amountAtomic) };
-  const idem = idempotencyKey(input.wallet, req);
-  const want = req.token;
-  const other: TokenSymbol = want === "USDT" ? "cNGN" : "USDT";
-  const keyHash = keyHashForSessionOrKey(session.publicKey);
-  const [authorized, bWant, bOther, rWant, rOther] = await Promise.all([
-    accountHasKey(reader, input.wallet, keyHash),
-    balanceOf(want, input.wallet),
-    balanceOf(other, input.wallet),
-    remainingOf(session, want),
-    remainingOf(session, other),
-  ]);
-  const balances = { [want]: bWant, [other]: bOther } as Record<TokenSymbol, bigint>;
-  const remaining = { [want]: rWant, [other]: rOther } as Record<TokenSymbol, bigint>;
+async function sessionProof(session: Session, wallet: `0x${string}`): Promise<TakerProof> {
+  const nonce = toHex(randomBytes(32));
+  const issuedAt = Date.now();
+  const signature = await client().signOrderTypedData({
+    session,
+    typedData: {
+      domain: { name: "Textile Taker Control", version: "1", chainId: 42220 },
+      types: { TakerControl: [{ name: "taker", type: "address" }, { name: "chainId", type: "uint256" }, { name: "nonce", type: "bytes32" }, { name: "issuedAt", type: "uint256" }] },
+      primaryType: "TakerControl",
+      message: { taker: wallet, chainId: 42220n, nonce, issuedAt: BigInt(issuedAt) },
+    },
+  });
+  return { nonce, issuedAt, signature };
+}
 
-  // Pay directly when the wallet holds the bill's token; otherwise convert from the other one.
-  const direct = bWant >= req.amountAtomic;
-  let quote: FirmQuote | null = null;
-  let conversionError: string | undefined;
-  if (!direct) {
-    try {
-      quote = await requestFirm({ sellToken: other, buyToken: want, buyAmount: req.amountAtomic.toString() }, input.wallet);
-      if (quote.status !== "quoted" || !quote.quote) conversionError = quote.reason ?? "no_quote";
-      else if (BigInt(quote.quote.buyAmount) < req.amountAtomic) conversionError = "quote_short";
-      else if (quote.quote.reactor.toLowerCase() !== TEXTILE.reactor.toLowerCase()) conversionError = "unexpected_reactor";
-    } catch (e) {
-      conversionError = e instanceof TextileError ? `${e.message}${e.reason ? ` (${e.reason})` : ""}` : String(e);
-    }
+async function firmQuote(req: Extract<ExecuteRequest, { kind: "convert" }>, session: Session, wallet: `0x${string}`): Promise<{ quote?: FirmQuote; error?: string }> {
+  const body = { sellToken: req.sellToken, buyToken: req.buyToken, ...(req.buyAmountAtomic ? { buyAmount: req.buyAmountAtomic } : { sellAmount: req.sellAmountAtomic }) };
+  try {
+    const proof = process.env.TEXTILE_API_KEY ? undefined : await sessionProof(session, wallet).catch(() => undefined);
+    const q = await requestFirm(body, wallet, proof);
+    if (q.status !== "quoted" || !q.quote || !q.transactions) return { error: q.reason ?? "Textile FX has no quote for this amount right now." };
+    if (q.quote.reactor.toLowerCase() !== TEXTILE.reactor.toLowerCase() || q.transactions.swap.to.toLowerCase() !== TEXTILE.reactor.toLowerCase()) return { error: "The conversion points at an unexpected contract, so it was stopped." };
+    if (q.quote.taker.toLowerCase() !== wallet.toLowerCase()) return { error: "The quote is for a different wallet, so it was stopped." };
+    if (req.buyAmountAtomic && BigInt(q.quote.buyAmount) < BigInt(req.buyAmountAtomic)) return { error: "The quote gives less than asked, so it was stopped." };
+    return { quote: q };
+  } catch (e) {
+    return { error: e instanceof TextileError ? `${e.message}${e.reason ? ` (${e.reason})` : ""}` : (e as Error).message };
   }
-  const source = direct ? want : other;
-  const sourceNeeded = direct ? req.amountAtomic : quote?.quote ? BigInt(quote.quote.takerPays) : req.amountAtomic;
-  const ctx: AutopayContext = {
-    now: Math.floor(Date.now() / 1000),
-    enabled: input.enabled,
-    expiry: policy.session.expiry,
-    revoked: false,
-    keyAuthorized: authorized,
-    recipients: policy.recipients,
-    remaining,
-    balances,
-    source,
-    sourceNeeded,
-    conversionAvailable: direct || (!!quote?.quote && !conversionError),
-    alreadyPaid: input.alreadyPaid || inFlight.has(idem),
-  };
-  const refusals = checkAutopay(req, ctx);
-  const q = quote?.quote ? { rfqId: quote.rfqId, sell: other, buy: want, takerPays: quote.quote.takerPays, feeAmount: quote.quote.feeAmount, rateRay: quote.quote.rateRay, expiresAt: quote.quote.expiresAt } : undefined;
-  if (refusals.length) return { ok: false, refusals, stage: "prepared", source, quote: q, error: conversionError, idempotencyKey: idem };
+}
 
+/**
+ * Run one movement the user's rules call for, inside their granted access:
+ * check everything → (Textile firm quote for a conversion) → one Altana batch →
+ * wait for the receipt. "completed" only when the receipt says success.
+ */
+export async function execute(input: { sealedPolicy: string; wallet: `0x${string}`; request: ExecuteRequest }): Promise<ExecuteResult> {
+  const { policy, session } = openPolicy(input.sealedPolicy, input.wallet);
+  const req = input.request;
+  const ctx = await context(policy, session, input.wallet, req.key);
   const calls: { to: `0x${string}`; data: Hex; value: bigint }[] = [];
-  if (!direct && quote?.quote && quote.transactions) {
-    if (Date.now() >= Date.parse(quote.quote.expiresAt)) return { ok: false, stage: "quoted", source, quote: q, error: "The conversion quote expired before it could be used.", idempotencyKey: idem };
-    calls.push({ to: TOKENS[other].address, data: encodeFunctionData({ abi: erc20Abi, functionName: "approve", args: [TEXTILE.reactor, BigInt(quote.quote.takerPays)] }), value: 0n });
-    const swap = quote.transactions.swap;
-    if (swap.to.toLowerCase() !== TEXTILE.reactor.toLowerCase()) return { ok: false, stage: "quoted", source, quote: q, error: "Conversion transaction targets an unexpected contract.", idempotencyKey: idem };
+  let quoteOut: ExecuteResult["quote"];
+  let firm: FirmQuote | undefined;
+
+  if (req.kind === "transfer") {
+    const amount = BigInt(req.amountAtomic);
+    const refusals = checkTransfer({ token: req.token, amount, recipient: req.recipient }, policy.recipients, ctx);
+    if (refusals.length) return { ok: false, status: "refused", refusals, key: req.key };
+    calls.push({ to: TOKENS[req.token].address, data: encodeFunctionData({ abi: erc20Abi, functionName: "transfer", args: [req.recipient, amount] }), value: 0n });
+  } else {
+    const templateOk = req.sellToken === "USDT" || (policy.templateVersion ?? 1) >= 2;
+    const got = templateOk ? await firmQuote(req, session, input.wallet) : {};
+    firm = got.quote;
+    const sellAmount = firm?.quote ? BigInt(firm.quote.takerPays) : BigInt(req.sellAmountAtomic ?? "0") || 1n;
+    if (firm?.quote) quoteOut = { rfqId: firm.rfqId, sellToken: req.sellToken, buyToken: req.buyToken, sellAmount: firm.quote.sellAmount, buyAmount: firm.quote.buyAmount, takerPays: firm.quote.takerPays, feeAmount: firm.quote.feeAmount, expiresAt: firm.quote.expiresAt };
+    const refusals = checkConversion({ sellToken: req.sellToken, sellAmount, routeOk: !!firm?.quote, templateOk }, ctx);
+    if (req.maxSellAtomic && sellAmount > BigInt(req.maxSellAtomic)) refusals.push("over_rule_max");
+    if (refusals.length) return { ok: false, status: "refused", refusals, quote: quoteOut, error: got.error, key: req.key };
+    if (Date.now() >= Date.parse(firm!.quote!.expiresAt)) return { ok: false, status: "failed", quote: quoteOut, error: "The conversion quote expired before it could be used. Nothing was sent.", key: req.key };
+    calls.push({ to: TOKENS[req.sellToken].address, data: encodeFunctionData({ abi: erc20Abi, functionName: "approve", args: [TEXTILE.reactor, BigInt(firm!.quote!.takerPays)] }), value: 0n });
+    const swap = firm!.transactions!.swap;
     calls.push({ to: swap.to, data: swap.data, value: BigInt(swap.value) });
   }
-  calls.push({ to: TOKENS[want].address, data: encodeFunctionData({ abi: erc20Abi, functionName: "transfer", args: [req.recipient, req.amountAtomic] }), value: 0n });
 
-  inFlight.add(idem);
+  inFlight.add(req.key);
   try {
     // Fee in USD₮ (accepted by the Celo relay), paid inside the USD₮ cap.
     const res = await client().execute({ session, calls, chainId: 42220, feeToken: TOKENS.USDT.address });
-    if (q && res.transactionHash) void textileSubmit(q.rfqId, quote!.claimToken, res.transactionHash).catch(() => {});
-    if (res.status !== "CONFIRMED" || !res.transactionHash) return { ok: false, stage: res.status === "PENDING" ? "submitted" : "failed", transactionHash: res.transactionHash, callsId: res.callsId, source, quote: q, error: res.status === "PENDING" ? "Sent, waiting for confirmation." : "The payment was rejected.", idempotencyKey: idem };
+    if (firm && res.transactionHash) void textileSubmit(firm.rfqId, firm.claimToken, res.transactionHash).catch(() => {});
+    if (!res.transactionHash) return { ok: false, status: "failed", quote: quoteOut, error: "The wallet didn't send it. Nothing moved.", key: req.key };
+    if (res.status !== "CONFIRMED") return { ok: false, status: res.status === "PENDING" ? "processing" : "failed", transactionHash: res.transactionHash, quote: quoteOut, error: res.status === "PENDING" ? "Sent, waiting for Celo to confirm." : "The wallet rejected it.", key: req.key };
     const receipt = await chain.waitForTransactionReceipt({ hash: res.transactionHash, timeout: 60_000 });
-    if (receipt.status !== "success") return { ok: false, stage: "failed", transactionHash: res.transactionHash, source, quote: q, error: "The payment transaction reverted on Celo.", idempotencyKey: idem };
-    return { ok: true, stage: "confirmed", transactionHash: res.transactionHash, callsId: res.callsId, source, quote: q, idempotencyKey: idem };
+    if (receipt.status !== "success") return { ok: false, status: "failed", transactionHash: res.transactionHash, quote: quoteOut, error: "The transaction reverted on Celo. Nothing moved.", key: req.key };
+    return { ok: true, status: "completed", transactionHash: res.transactionHash, quote: quoteOut, key: req.key };
   } catch (e) {
-    inFlight.delete(idem);
+    inFlight.delete(req.key);
     const msg = (e as { code?: string; message?: string }).code ? `${(e as { code: string }).code}: ${(e as Error).message}` : (e as Error).message;
-    return { ok: false, stage: "failed", source, quote: q, error: msg.slice(0, 400), idempotencyKey: idem };
+    return { ok: false, status: "failed", quote: quoteOut, error: msg.slice(0, 400), key: req.key };
   }
 }

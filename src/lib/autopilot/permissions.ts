@@ -3,17 +3,20 @@
 // key used at execute to equal what was granted, so both sides build them here.
 //
 // What the account contract enforces on-chain for this session:
-//  - calls: only USD₮.approve, USD₮.transfer, cNGN.transfer, and the Textile FX
+//  - calls: only USD₮.approve/transfer, cNGN.approve/transfer, and the Textile FX
 //    reactor. Any other contract or function reverts at validation.
 //  - spend: a monthly cap per token (UTC calendar month), which also covers the
 //    relay fee when it is paid in that token.
 //  - expiry: after it, the key is dead with no transaction.
-// What it cannot enforce: the recipient of a transfer (calls have no argument
-// rules). subscan's server checks the approved-recipient list before signing.
+// What it cannot enforce: the recipient of a transfer or the size of a single
+// transfer (calls have no argument rules). subscan's server checks the saved
+// recipients and the per-transfer maximum before signing.
 import { parseUnits } from "viem";
 import { TEXTILE, TOKENS, type TokenSymbol } from "../celo/config.ts";
 
 export const AUTOPILOT_PERIOD = "month" as const;
+/** Bumped when the call list changes; older grants must be renewed. */
+export const TEMPLATE_VERSION = 2;
 
 export interface AutopilotLimits {
   /** Monthly cap per token, in whole token units (e.g. "50" USD₮). */
@@ -27,6 +30,7 @@ export function autopilotPermissions(limits: AutopilotLimits) {
     calls: [
       { to: TOKENS.USDT.address, signature: "approve(address,uint256)" },
       { to: TOKENS.USDT.address, signature: "transfer(address,uint256)" },
+      { to: TOKENS.cNGN.address, signature: "approve(address,uint256)" },
       { to: TOKENS.cNGN.address, signature: "transfer(address,uint256)" },
       { to: TEXTILE.reactor },
     ],

@@ -1,188 +1,141 @@
-// Shared domain types. Kept framework-free so detection + agent tools can run
-// in the browser, in API routes and in node:test.
+// Shared domain types. Framework-free so the planner can run in the browser,
+// in API routes and in node:test.
+import type { TokenSymbol } from "./celo/config.ts";
+export type { TokenSymbol };
 
-export type Currency = string; // ISO-4217 style code, e.g. "NGN", "USD"
-
-export interface Transaction {
+/** Someone the user sends money to. The address is confirmed once, then never changed. */
+export interface Recipient {
   id: string;
-  date: string; // ISO yyyy-mm-dd
-  description: string;
-  merchant: string; // normalised merchant key/label
-  amount: number; // always positive; see direction
-  currency: Currency;
-  /** Money out (debit) or in (credit). Older records without it are debits. */
-  direction?: "debit" | "credit";
-  source: "csv" | "pdf" | "sample" | "manual" | "mono";
-  /** Stable key for de-duplicating repeat imports of the same statement. */
-  fingerprint?: string;
+  name: string;
+  address: `0x${string}`;
+  createdAt: string;
+  /** When the user confirmed this exact address. Unconfirmed recipients can't receive money. */
+  confirmedAt?: string;
 }
 
-/** Subscriptions, utilities, and other recurring obligations (rent, loans, insurance…). */
-export type ObligationKind = "subscription" | "utility" | "obligation";
-/** Fixed bills charge the same each time; variable bills (e.g. electricity) move around. */
-export type BillType = "fixed" | "variable";
+/**
+ * keep_min       keep at least `amount` of `token`; top up by converting from `fromToken`.
+ * convert_below  when `token` falls below `amount`, convert `convertAmount` of `fromToken` into it.
+ * reserve_share  keep `sharePct`% of the wallet's value in `token`.
+ * transfer_cap   never allow an automated transfer of `token` above `amount`.
+ */
+export type RuleKind = "keep_min" | "convert_below" | "reserve_share" | "transfer_cap";
 
-export type Frequency = "weekly" | "monthly" | "quarterly" | "yearly";
-
-export type SubscriptionStatus = "detected" | "confirmed" | "dismissed";
-
-export interface PricePoint {
-  date: string;
-  amount: number;
+export interface MoneyRule {
+  id: string;
+  name: string;
+  kind: RuleKind;
+  /** The token the rule protects or targets. */
+  token: TokenSymbol;
+  /** Threshold (keep_min, convert_below) or cap (transfer_cap), whole token units. */
+  amount: string;
+  /** reserve_share: percentage 1–99. */
+  sharePct?: number;
+  /** Token to convert from (keep_min, convert_below, reserve_share). */
+  fromToken?: TokenSymbol;
+  /** convert_below: how much of `fromToken` to convert each time. */
+  convertAmount?: string;
+  /** Largest single conversion this rule may make, in `fromToken` units. */
+  maxAmount?: string;
+  /** Ask before converting instead of converting straight away. */
+  askFirst?: boolean;
+  status: "active" | "paused";
+  createdAt: string;
+  updatedAt: string;
+  lastCheckedAt?: string;
+  lastRunAt?: string;
+  lastOutcome?: string;
 }
 
-export interface PaymentTarget {
-  // How the merchant is settled. Only "address" and "x402" are supported, both
-  // must be supplied/verified by the user — subscan never invents recipients.
-  method: "address" | "x402";
-  address?: `0x${string}`;
-  x402Url?: string;
-  token: "cNGN" | "USDT";
+export type Frequency = "once" | "weekly" | "monthly";
+
+export interface TransferSchedule {
+  id: string;
+  recipientId: string;
+  token: TokenSymbol;
+  amount: string; // whole token units
+  frequency: Frequency;
+  firstDate: string; // yyyy-mm-dd
+  endDate?: string;
+  /** Stop once this much has been sent in total. */
+  maxTotal?: string;
+  /** Never send more than this in one transfer. */
+  txLimit?: string;
+  status: "active" | "paused" | "cancelled" | "ended";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ActivityStatus = "scheduled" | "awaiting_approval" | "processing" | "completed" | "failed" | "cancelled";
+
+export interface Activity {
+  id: string;
+  kind: "transfer" | "conversion";
+  status: ActivityStatus;
+  createdAt: string;
+  updatedAt: string;
+  /** One movement per key: `schedule:<id>:<date>` or `rule:<id>:<window>`. */
+  key: string;
+  scheduleId?: string;
+  ruleId?: string;
+  /** Scheduled date this transfer belongs to. */
+  occurrence?: string;
+  token: TokenSymbol;
+  amount: string; // human units: sent, or sold for a conversion
+  toToken?: TokenSymbol;
+  toAmount?: string;
+  fee?: string;
+  rfqId?: string;
+  recipient?: `0x${string}`;
+  recipientName?: string;
+  txHash?: `0x${string}`;
+  /** Set when the browser re-read the receipt and found the expected token movement. */
   verifiedAt?: string;
+  error?: string;
+  refusals?: string[];
+  retryOf?: string;
   note?: string;
 }
 
-export interface Subscription {
-  id: string;
-  merchant: string;
-  displayName: string;
-  category: string;
-  amount: number; // latest charge
-  currency: Currency;
-  frequency: Frequency;
-  intervalDays: number; // median observed interval
-  lastCharge: string;
-  nextRenewal: string;
-  firstSeen: string;
-  chargeCount: number;
-  totalSpent: number;
-  history: PricePoint[];
-  confidence: number; // 0..1
-  confidenceReasons: string[];
-  status: SubscriptionStatus;
-  priceChange?: { from: number; to: number; date: string; pct: number };
-  international: boolean; // billed in a currency other than the home currency
-  lapsed?: boolean; // no charge for more than ~2 billing periods — probably cancelled
-  kind?: ObligationKind; // defaults to "subscription" for older records
-  billType?: BillType; // defaults to "fixed"
-  /** Typical amount for variable bills (median of recent charges). */
-  typicalAmount?: number;
-  /** An expected charge that is missing from the statement period. */
-  missed?: { expected: string };
-  /** Latest charge is far above the usual amount. */
-  unusual?: { amount: number; typical: number; date: string };
-  manual?: boolean; // added by the user rather than detected
-  payment?: PaymentTarget;
-  edited?: boolean;
-  /** Let Autopilot pay this bill when it's due, within the user's limits. */
-  autopay?: boolean;
-}
-
-export type PaymentStepKind = "approval" | "conversion" | "settlement";
-export type PaymentStatus = "prepared" | "pending" | "confirmed" | "failed";
-
-export interface PaymentStep {
-  kind: PaymentStepKind;
-  label: string;
-  status: PaymentStatus;
-  hash?: `0x${string}`;
-  error?: string;
-  at?: string;
-}
-
-export interface PaymentRecord {
-  id: string;
-  createdAt: string;
-  subscriptionId: string;
-  merchant: string;
-  sourceToken: "USDT" | "cNGN";
-  destinationToken: "USDT" | "cNGN";
-  sourceAmount: string; // human units
-  destinationAmount: string; // human units
-  feeAmount?: string;
-  rate?: string;
-  recipient?: string;
-  method: "address" | "x402";
-  rfqId?: string;
-  steps: PaymentStep[];
-  status: PaymentStatus;
-  from?: `0x${string}`;
-  /** "autopilot" = sent by subscan's agent from the Altana wallet under the user's session. */
-  via?: "wallet" | "autopilot";
-  /** One payment per bill per due date. */
-  idempotencyKey?: string;
-  /** Payment engine stage, for autopilot payments. */
-  stage?: "detected" | "prepared" | "quoted" | "converted" | "submitted" | "confirmed" | "failed";
-  /** Why the agent stopped, in plain words. */
-  refusals?: string[];
-}
-
-export interface AutopilotRecipient {
-  address: `0x${string}`;
-  label: string;
-  billId?: string;
-}
-
-export interface AutopilotState {
+export interface PaymentWalletState {
   /** The user's non-custodial Altana smart wallet (passkey admin). */
   wallet: `0x${string}`;
   /** The passkey's public credential (id + public key; nothing secret), to sign again on this device. */
   passkey?: { kind: "webauthn"; id: string; publicKey: `0x${string}`; rpId?: string };
+  /** Automation switch: when off, nothing runs automatically. */
   enabled: boolean;
   /** Sealed access token from subscan's server (opaque to the browser). */
   sealedPolicy?: string;
-  /** Sealed agent key waiting for the grant (between steps). */
-  sealedKey?: string;
   agentPublicKey?: `0x${string}`;
+  /** Monthly cap per token, whole units (enforced by the wallet contract). */
   limits: { USDT: string; cNGN: string };
-  recipients: AutopilotRecipient[];
+  /** Largest single automated movement per token (checked by subscan's server). */
+  maxPerTransfer?: { USDT?: string; cNGN?: string };
   expiry?: number; // unix seconds
   grantTx?: `0x${string}`;
   grantedAt?: string;
   revokedAt?: string;
   revokeTx?: `0x${string}`;
+  templateVersion?: number;
 }
 
 export interface AppSettings {
-  homeCurrency: Currency;
+  /** The user's everyday wallet (MiniPay, MetaMask), used to add money. */
   wallet?: `0x${string}`;
   agentId?: string;
   agentRegistrationTx?: `0x${string}`;
   payGasInUsdt: boolean;
   displayName?: string;
-  onboarded?: boolean;
 }
 
 export interface AppState {
-  transactions: Transaction[];
-  subscriptions: Subscription[];
-  payments: PaymentRecord[];
+  version: 2;
   settings: AppSettings;
-  importedAt?: string;
-  dataSource?: "csv" | "pdf" | "sample" | "mono";
-  /** Imports performed, newest first (metadata only — raw files are never stored). */
-  imports?: ImportRecord[];
-  /** Actions the user approved from the agent workspace (newest first). */
-  actions?: AgentAction[];
-  autopilot?: AutopilotState;
-}
-
-export interface ImportRecord {
-  id: string;
-  at: string;
-  fileName: string;
-  format: string; // e.g. "csv", "pdf: generic table"
-  rows: number; // rows added
-  duplicates: number; // rows skipped as already imported
-  from?: string;
-  to?: string;
-}
-
-export interface AgentAction {
-  id: string;
-  at: string;
-  kind: "confirmed" | "dismissed" | "restored" | "recategorised" | "payment-prepared" | "payment-sent";
-  title: string;
-  detail?: string;
-  href?: string;
+  autopilot?: PaymentWalletState;
+  recipients: Recipient[];
+  rules: MoneyRule[];
+  schedules: TransferSchedule[];
+  activity: Activity[];
+  /** Set once when bill and statement data from an older version was cleared. */
+  legacyCleared?: string;
 }

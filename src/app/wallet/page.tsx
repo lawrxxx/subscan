@@ -6,9 +6,9 @@ import { addressUrl, CHAIN_ID, ERC8004, ERC8004_IDENTITY_ABI, TEXTILE, TOKENS } 
 import { ATTRIBUTION_CODES } from "@/lib/celo/attribution";
 import { publicClient, sendTx, waitForReceipt } from "@/lib/celo/wallet";
 import { useStore } from "@/lib/db/store";
-import { date, shortHash } from "@/lib/format";
+import { shortHash } from "@/lib/format";
 import { HashLink } from "@/components/bits";
-import { EmptyPanel, Icon, PageBar, PayStatus } from "@/components/ui";
+import { EmptyPanel, Icon, PageBar } from "@/components/ui";
 import { useWallet } from "@/components/wallet";
 
 interface Status {
@@ -37,8 +37,7 @@ export default function WalletPage() {
   }, []);
 
   const agentId = state.settings.agentId ?? status?.erc8004AgentId ?? undefined;
-  const history = state.payments.filter((p) => p.status !== "prepared");
-  const fx = state.payments.filter((p) => p.status === "confirmed" && p.sourceToken !== p.destinationToken);
+  const fx = state.activity.filter((a) => a.kind === "conversion" && a.status === "completed");
 
   async function register() {
     if (!w.address) return;
@@ -60,10 +59,10 @@ export default function WalletPage() {
 
   return (
     <div>
-      <div className="px-4 pt-5 text-[13px] sm:px-6 lg:px-8"><Link href="/settings" className="text-muted hover:text-ink">← Settings</Link></div>
+      <div className="px-4 pt-4 text-[13px] sm:px-6 lg:px-8 lg:pt-8"><Link href="/settings" className="inline-flex items-center gap-1 text-muted hover:text-ink"><Icon name="back" size={15} />settings</Link></div>
       <PageBar
-        title="Wallet"
-        sub="Balances are read live from Celo mainnet. subscan never holds your keys or funds."
+        title="everyday wallet"
+        sub="The wallet you already use (MiniPay, MetaMask), for adding money to your payment wallet. subscan never holds its keys."
         actions={w.address ? <button className="btn btn-ghost" onClick={w.refresh}>Refresh</button> : <button className="btn btn-primary" onClick={w.connect} disabled={!w.hasProvider || w.connecting}>{w.connecting ? "Connecting…" : "Connect wallet"}</button>}
       />
 
@@ -108,34 +107,6 @@ export default function WalletPage() {
             {w.error && <p className="border-t rule px-5 py-2 text-[12px] text-alert">{w.error}</p>}
           </section>
 
-          <section className="panel">
-            <div className="panel-head">
-              <h2 className="panel-title">Payment history</h2>
-            </div>
-            {!history.length ? (
-              <EmptyPanel icon="activity" title="No on-chain payments yet">Payments you approve from a bill appear here with their Celo transaction hashes.</EmptyPanel>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="tbl">
-                  <thead><tr><th>Date</th><th>Payee</th><th className="r">Amount</th><th className="hidden md:table-cell">Settlement tx</th><th>Status</th></tr></thead>
-                  <tbody>
-                    {history.map((p) => {
-                      const settle = p.steps.find((s) => s.kind === "settlement")?.hash;
-                      return (
-                        <tr key={p.id}>
-                          <td className="num whitespace-nowrap text-muted">{date(p.createdAt.slice(0, 10))}</td>
-                          <td><Link href={`/wallet/${p.id}`} className="font-medium hover:underline">{p.merchant}</Link></td>
-                          <td className="r num whitespace-nowrap">{p.destinationAmount} {TOKENS[p.destinationToken].display}</td>
-                          <td className="hidden md:table-cell">{settle ? <HashLink hash={settle} n={4} /> : <span className="text-[12px] text-faint">—</span>}</td>
-                          <td><PayStatus status={p.status} /></td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
         </div>
 
         <div className="space-y-4">
@@ -147,14 +118,14 @@ export default function WalletPage() {
             <div className="px-4 pt-4 pb-3 sm:px-5">
               <div className="label">Indicative rate</div>
               <div className="figure mt-1 text-[24px]">{status?.textile.ngnPerUsd ? <>1 USD₮ = ₦{status.textile.ngnPerUsd.toLocaleString("en-US", { maximumFractionDigits: 2 })}</> : status ? "—" : "Loading…"}</div>
-              <p className="mt-1 text-[12px] text-muted">Firm quotes are requested from Textile when you approve a payment and hold for a short window.</p>
+              <p className="mt-1 text-[12px] text-muted">Indicative only. Every conversion uses a firm Textile quote, valid for a short window.</p>
             </div>
             <dl className="border-t rule">
               <Row k="Pair">USD₮ ↔ cNGN</Row>
               <Row k="Protocol fee">Shown on each quote</Row>
               <Row k="Settlement">LimitOrderReactor · <a className="font-mono text-[12px] link" href={addressUrl(TEXTILE.reactor)} target="_blank" rel="noreferrer">{shortHash(TEXTILE.reactor, 4)}</a></Row>
               <Row k="Quote auth">{status?.textile.auth === "api-key" ? "Builder API key (server-side)" : "Wallet proof (EIP-712)"}</Row>
-              <Row k="Your conversions">{fx.length ? `${fx.length} confirmed` : "None yet"}</Row>
+              <Row k="Your conversions">{fx.length ? `${fx.length} completed` : "None yet"}</Row>
             </dl>
           </section>
 

@@ -1,131 +1,75 @@
 # subscan · Celo Agents Open for Business
 
-subscan is a **rule-based** personal bills agent (no language model). People upload a bank
-statement; subscan's deterministic rules find their regular payments, schedule what's due and
-decide what to pay. Payments run from the user's own **Altana** smart agentic wallet under a
-session they grant; **Textile FX** converts USD₮ ↔ cNGN when a bill needs it.
+subscan is a **rule-based personal money autopilot** (no language model). People set money rules for
+their stablecoin balances and schedule recurring transfers to saved recipients. Everything runs from
+the user's own **Altana** smart agentic wallet under a session they grant; **Textile FX** converts
+USD₮ ↔ cNGN at firm quotes.
 
 | Layer | Responsibility | Code |
 | --- | --- | --- |
-| subscan | statement parsing, recurring detection, scheduling, payment rules, decisions | `lib/import`, `lib/detection`, `lib/agent/rules.ts`, `lib/payments/engine.ts` |
-| Altana | smart agentic wallet, session keys, on-chain permissions, execution, revocation | `lib/autopilot/*` (`@altananetwork/sdk`) |
+| subscan | rules, schedules, planning, every pre-signing check, records and verification | `lib/money/*`, `lib/payments/engine.ts` |
+| Altana | smart wallet, session permissions, execution, revocation | `lib/autopilot/*` (`@altananetwork/sdk`) |
 | Textile FX | stablecoin conversion (RFQ v2) | `lib/textile/*` |
 
 Tracks entered: **Stablecoin Corridors (Textile FX)** and **Altana Smart Agentic Wallets**.
 
-## 1. Architecture
+## 1. How it works
 
 ```
-Statement (PDF/CSV, parsed in the browser)
-        │
+Money rules (keep a minimum · convert when low · keep a share · cap transfers)
+Recurring transfers (saved, confirmed recipients · once / weekly / monthly · limits)
+        │  stored in the browser
         ▼
-Detection → bills with verified recipient (Celo address the user added)
-        │
-        ├── Manual pay (/pay/[id]) ─ user's own wallet (MiniPay/MetaMask), one prompt per step
-        │        approve → Textile swap → transfer   (each tx tagged ERC-8021)
-        │
-        └── Autopilot (/autopilot) ─ user's Altana smart wallet (passkey admin)
-                 │  session granted to subscan's agent key: calls allowlist, monthly cap, expiry
-                 ▼
-          /api/autopilot  (server)
-            1. open sealed policy (AES-256-GCM, AUTOPILOT_SEAL_KEY)
-            2. read on-chain: key authorised? remaining monthly allowance (spendInfos), balances
-            3. shared engine checks (lib/payments/engine.ts)
-            4. bill needs another token → Textile FX firm quote, taker = Altana wallet
-            5. one atomic Altana execute: [USD₮.approve(reactor), reactor swap, cNGN.transfer(recipient)]
-            6. wait for receipt → "confirmed" only on success; report hash to Textile /submit
+Planner (lib/money/plan.ts, pure): what's due now, from real balances and today's date
+        │  runs every minute while subscan is open, one tab at a time (Web Locks)
+        ▼
+Activity record saved as "processing" with an idempotency key   ── then ──▶  /api/autopilot  execute
+                                                                              1. open sealed policy (AES-256-GCM)
+                                                                              2. read on-chain: key authorised, remaining monthly cap, balances
+                                                                              3. checks: saved recipient, per-transfer cap, rule max vs firm quote, duplicate
+                                                                              4. conversion → Textile firm quote (taker = the user's Altana wallet)
+                                                                              5. one Altana session execute ([transfer] or [approve, swap])
+                                                                              6. wait for receipt
+        ▼
+Browser re-reads the receipt and checks the expected token Transfer log → "completed"
 ```
 
-Shared payment engine (`src/lib/payments/engine.ts`): stages `detected → prepared → quoted →
-converted → submitted → confirmed | failed`, and `checkAutopay()` which returns every refusal:
-`autopilot_off, access_expired, access_revoked, key_not_authorized, recipient_not_approved,
-over_limit, insufficient_funds, route_unavailable, invalid_amount, already_paid`.
+States: scheduled · awaiting approval · processing · completed · failed · cancelled.
+Transfers more than 3 days late (subscan wasn't open) wait for approval; a rule converts at most once
+per 6-hour window and never stacks. A processing record with no hash after 15 minutes is marked
+failed with a warning to check the wallet before retrying.
 
-Key files
+## 2. Where each limit is enforced
 
-| Area | File |
+| Limit | Enforced by |
 | --- | --- |
-| Session template (shared by grant and execute) | `src/lib/autopilot/permissions.ts` |
-| Browser: passkey wallet, fund, grant, quote, revoke | `src/lib/autopilot/browser.ts` |
-| Server: issue/seal key, activate, status, pay | `src/lib/autopilot/server.ts`, `src/app/api/autopilot/route.ts` |
-| Autonomous runner (due bills marked Auto) | `src/lib/autopilot/runner.ts` |
-| Textile RFQ v2 client | `src/lib/textile/client.ts` |
-| Manual pay flow | `src/app/pay/[id]/page.tsx`, `src/lib/payments/execute.ts` |
-| Agent rules (decision per bill) | `src/lib/agent/rules.ts` |
-| Agent page (decisions, needs-you, quick answers) | `src/app/agent/page.tsx` |
+| Which contracts and functions (USD₮/cNGN approve + transfer, Textile reactor) | **Altana wallet contract, on-chain** |
+| Monthly cap per token (includes relay fees) | **Altana wallet contract, on-chain** |
+| Expiry and one-transaction revoke | **Altana wallet contract, on-chain** |
+| Recipient must be saved and confirmed | subscan server, before signing (Altana call permissions have no argument rules) |
+| Per-transfer cap (payment wallet cap and "never above" rules, the stricter) | subscan server, before signing; the planner also blocks it |
+| Rule's maximum conversion vs the live firm quote | subscan server, before signing |
+| Max total, end date and per-transfer limit of a schedule | planner, before anything is sent |
 
-## 2. Textile FX status
+## 3. Limitations (stated in the product)
 
-| Item | Status |
-| --- | --- |
-| RFQ v2 preview / firm request / submit / status / cancel | Implemented (`/api/fx/*`) |
-| Corridor | USD₮ ↔ cNGN on Celo mainnet (reactor `0xa9AA0a64769cBed4d3B1Ceb4Df01CdE915C235b3`) |
-| Manual flow, keyless (EIP-712 TakerControl from the user's wallet) | **Proven on mainnet** earlier in the build: 2,000 cNGN paid for 1.3891 USD₮ (rate 1,439.80, fee 0.0003 USD₮), tagged |
-| Autopilot flow (taker = Altana smart wallet) | **Proven on mainnet** (§8, test 6): firm quote + atomic approve/swap/transfer in one session transaction. Keyless proof worked for a wallet with an EOA admin; passkey wallets still need `TEXTILE_API_KEY`. Textile's minimum order is ≈1,440 cNGN (≈1 USD₮) |
-| Builder codes in Textile's own tag | With `TEXTILE_API_KEY`: `includeAttribution` + `builderCodes` |
-
-## 3. Altana status
-
-| Item | Status |
-| --- | --- |
-| SDK | `@altananetwork/sdk@1.2.0`, network `CELO` (42220), relay `relay.altana.network` |
-| Passkey wallet creation in the browser | **Verified** (virtual authenticator, Celo mainnet relay): wallets created in ~5 s, only address + public credential stored |
-| Session template | calls: `USD₮.approve`, `USD₮.transfer`, `cNGN.transfer`, Textile reactor (any method); spend: monthly cap on USD₮ and cNGN; expiry 7/30/90 days |
-| On-chain enforcement | Account contract (calls allowlist, spend caps incl. relay fee, expiry); revocation one transaction |
-| Recipient allowlist | **Not enforceable on-chain** (call permissions have no argument rules). Enforced by subscan's server before signing; stated in the UI |
-| Agent key custody | Per-user key generated server-side, sealed; never in the browser, never stored server-side |
-| ERC-8021 | `altana,subscan,celo_e97672462153` on every Autopilot transaction (`appCode`) |
-| ERC-8004 | Autopilot wallet registered by the SDK after its first admin action as "subscan Autopilot" (registry `0x8004A169FB4a3325136EB29fA0ceB6D2e539a432`) |
-| Grant cost | A new wallet's first admin action registers the wallet in Altana's KeyStore: ≈9.3 CELO once (measured), shown before the user confirms. Each session key is granted with `register: false`, so later grants cost only the relay fee; the session is still authorised and enforced by the wallet contract (only the optional public listing of the session key, another ≈9.3 CELO each time, is skipped) |
-| Live mainnet permission tests | **All 8 passed on Celo mainnet, 28 Nov 2026** (§8) |
+1. **No background execution.** No database or server-side store, so rules and transfers run only while subscan is open in a browser.
+2. **Recipient allowlist and per-transfer cap are off-chain** (server checks), by design of Altana's permission model.
+3. **Textile route:** USD₮ ↔ cNGN on Celo, minimum about 1 USD₮ (≈1,450 cNGN). Anything else is refused with Textile's reason.
+4. **Keyless conversions from Face ID wallets:** the server signs Textile's taker proof with the session key (`signOrderTypedData`, ERC-1271). Whether Textile accepts it for passkey wallets is being verified on mainnet (§5, round 2). With `TEXTILE_API_KEY` (partner key) no proof is needed.
+5. **Setup cost:** ≈9.3 CELO once per new wallet (Altana KeyStore registration of the wallet); later grants cost only the relay fee (session keys are granted with `register: false`).
 
 ## 4. Environment variables (Vercel)
 
 | Name | Need | Notes |
 | --- | --- | --- |
-| `AUTOPILOT_SEAL_KEY` | required for Autopilot | 32+ character random password (or 64 hex). Server only. Set |
-| `TEXTILE_API_KEY` | recommended | Needed for Autopilot conversions from passkey wallets |
+| `AUTOPILOT_SEAL_KEY` | required | 32+ character random password (or 64 hex). Server only. Set |
+| `TEXTILE_API_KEY` | optional | Mainnet partner key (`tx_live_`). Not set: only a testnet key exists |
 | `ERC8004_AGENT_ID` | recommended | subscan's own agent id |
-| `NEXT_PUBLIC_APP_URL` | recommended | ERC-8004 agent card |
 
-All listed in `env.manifest.json`; `npm run env:sync` adds them through the Vercel CLI with hidden prompts.
+## 5. Verified transaction evidence
 
-## 5. Deploy
-
-Push to `claude/admiring-cerf-0e3i28` (Vercel builds it). Then:
-
-```bash
-npx vercel login && npx vercel link
-npm run env:add -- AUTOPILOT_SEAL_KEY      # paste: output of openssl rand -hex 32
-npm run env:add -- TEXTILE_API_KEY
-npm run env:deploy && npm run env:verify
-```
-
-## 6. Tests
-
-* Unit (`npm test`): 42 passing, including engine refusals (over limit, unapproved recipient,
-  expired, revoked, unauthorised key, no route, no funds, already paid), the exact session
-  template, sealing (wrong secret / wrong wallet rejected), statement direction parsing.
-* Browser (Playwright): full app 183/183, import flow 89/89, Autopilot UI: passkey wallet
-  creation on Celo, no secrets stored, plain language, unfunded grant fails with Altana's own
-  message (no fake success).
-
-## 7. Mainnet test plan (runs once the test wallet is funded)
-
-Test wallet: `0xCf1242929b1ABFC9264c7B6f7Ff87a8403C2B187`. Limits 2 USD₮ / 1,600 cNGN a month.
-
-1. Grant subscan's session (template above, 1 USD₮ / 800 cNGN monthly, 1 h expiry)
-2. Eligible payment through subscan's server (0.10 USD₮ to an approved recipient) → confirmed + tag
-3. Unapproved recipient → refused by subscan before signing
-4. Over the cap (2.5 USD₮) → rejected by the account
-5. Call outside the allowlist (`cNGN.approve`) → rejected by the account
-6. Textile conversion inside the session: firm quote → approve + swap + pay 1,450 cNGN, one transaction
-7. Short session (2 min) → payment after expiry rejected
-8. Revoke → payment rejected; subscan's server reports `key_not_authorized`
-
-Evidence is in §8.
-
-## 8. Verified transaction evidence
+### Round 1: Altana permissions + Textile inside a session (28 Nov 2026, bill-payment build, same Altana/Textile path)
 
 Altana + Textile, Celo mainnet, 28 Nov 2026. Wallet `0xCf1242929b1ABFC9264c7B6f7Ff87a8403C2B187`,
 approved recipient `0x044d4b5C1a7B247d9C03e192e88c91d260f669c8`.
@@ -144,29 +88,21 @@ approved recipient `0x044d4b5C1a7B247d9C03e192e88c91d260f669c8`.
 Test 6 ran separately with a 2 USD₮ / 1,600 cNGN cap because Textile's minimum order is above the
 first run's 1 USD₮ cap; the script now uses that cap for every test.
 
-Earlier: Textile FX manual payment from the owner's wallet (2,000 cNGN for 1.3891 USD₮), recorded in
+Earlier: Textile FX keyless conversion from the owner's wallet (2,000 cNGN for 1.3891 USD₮), recorded in
 the app's payment history.
 
-## 9. Outstanding blockers
 
-1. **`AUTOPILOT_SEAL_KEY`**: added on Vercel by the owner (28 Nov); confirm `/api/autopilot` reports `available: true` after each deploy.
-2. **`TEXTILE_API_KEY`**: only a testnet key is available to the owner, which Textile rejects on Celo mainnet, so it is deliberately not set. Manual conversions work keyless; Autopilot pays in the currency the wallet holds and refuses conversions honestly.
-3. **ERC-8004 id for subscan itself** not registered/recorded yet (Autopilot wallets self-register via the SDK).
-4. Altana recipient allowlist is off-chain by design of the permission model (documented).
-5. Autopilot runs when the user opens subscan (browser storage only, no server database); there is no background scheduler.
+### Round 2: money autopilot build
 
-## 10. Demo script
+Pending a funded test wallet: `scripts/autopilot-mainnet-test.ts` runs grant → transfer to saved recipient →
+unsaved recipient refused → per-transfer cap refused → rule conversion USD₮→cNGN (keyless session proof) →
+rule max refused → cNGN→USD₮ conversion → on-chain monthly cap and call-list rejections → revoke.
 
-**Textile FX (≈ 2 min)**
-1. Home → *Add a statement* → upload a statement → results → *Import*.
-2. Payments → open a naira bill → *Pay from a digital wallet* → add the provider's Celo address.
-3. *Review a payment*: "You send" USD₮, live Textile rate and fee, "Recipient gets" cNGN, network Celo 42220.
-4. Approve in MiniPay: approve → Textile swap → transfer; receipt shows three hashes with the ERC-8021 tag.
+## 6. Demo script (≈4 min)
 
-**Altana (≈ 3 min)**
-1. Settings → *Autopilot*: read "what it can and can't do".
-2. *Create Autopilot wallet* (Face ID). *Add money* from MiniPay (≈10 CELO for the one-time wallet registration, plus a few USD₮).
-3. Set limits (e.g. 20 USD₮ / 30,000 cNGN a month), approve the bill's recipient, 30 days; *Give subscan access* (Face ID). Show the grant on Celoscan.
-4. Mark the bill *Auto*; open **Agent**: the bill shows *Paying now* with the rule that allowed it; tap *Pay due now* (or open Home): Autopilot pays it (converting USD₮→cNGN on Textile in the same transaction) and shows the hash.
-5. Try a bill to an unapproved recipient → refused, with the reason. Lower the limit → over-limit refused by the wallet.
-6. *Revoke subscan's access* (one transaction) → the next attempt is refused.
+1. Home: honest empty state → *Get started* → create the payment wallet (Face ID) → add money from MiniPay.
+2. Give access: monthly limits, per-transfer cap, 30 days; shown on Celoscan.
+3. Money rules → *Keep a minimum balance*: keep 5,000 cNGN, top up from USD₮. On the next check subscan converts on Textile (firm quote, fee shown) and the activity shows the verified hash.
+4. Transfers → *Schedule a transfer*: add Mum, confirm the address, 2,000 cNGN every month, summary, activate. The first one goes out; activity shows the hash.
+5. Add a "never above 1,000 cNGN" rule → the next transfer is blocked before signing, with the reason.
+6. Payment wallet → *Revoke* (one transaction) → the next attempt is refused.

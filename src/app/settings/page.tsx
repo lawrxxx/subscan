@@ -3,109 +3,81 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ATTRIBUTION_CODES } from "@/lib/celo/attribution";
 import { useStore } from "@/lib/db/store";
-import { date } from "@/lib/format";
-import { PageBar } from "@/components/ui";
-import { useWallet } from "@/components/wallet";
 import { shortHash } from "@/lib/format";
+import { accessState } from "@/lib/money/runner";
+import { Icon, PageBar } from "@/components/ui";
+import { useWallet } from "@/components/wallet";
 
 interface Status {
   celoRpc: { ok: boolean; block?: string; error?: string };
   textile: { ok: boolean; ngnPerUsd?: number; auth?: string; error?: string };
   agent?: { engine: string; wallet: string; autopilot: boolean };
-  attribution?: { app: string; assigned: boolean };
 }
 
 export default function Settings() {
-  const { state, updateSettings, reset, removeImport } = useStore();
+  const { state, updateSettings, reset } = useStore();
   const w = useWallet();
   const [status, setStatus] = useState<Status | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
-  const [removing, setRemoving] = useState<string | null>(null);
   const [tech, setTech] = useState(false);
   const [saved, setSaved] = useState<string>();
+  const access = accessState(state);
 
   useEffect(() => {
     fetch("/api/status").then((r) => r.json()).then((j) => setStatus(j.data)).catch(() => setStatus(null));
   }, []);
-
   const flash = (m: string) => {
     setSaved(m);
     setTimeout(() => setSaved(undefined), 1800);
   };
+  const accessText = { none: "Not set up", revoked: "Access revoked", expired: "Access expired", off: "Automation paused", on: "Automation on" }[access];
 
   return (
-    <div>
-      <PageBar title="Settings" sub="Your statements, currency, wallet and data" />
-      {saved && <p className="mx-4 mb-3 rounded-[12px] bg-accent-wash px-3 py-2 text-[13px] text-accent sm:mx-6 lg:mx-8" role="status">{saved}</p>}
+    <div className="lg:max-w-[880px]">
+      <PageBar title="settings" sub="payment wallet, everyday wallet and your data" />
+      {saved && <p className="callout callout-sage mx-4 mb-3 block text-[13px] sm:mx-6 lg:mx-8" role="status">{saved}</p>}
 
-      <Section title="Your statements" note="We keep the transactions you saved, never the files.">
-        {state.imports?.length ? (
-          <ul className="divide-y divide-[var(--color-rule-soft)] border-y rule-soft">
-            {state.imports.map((i) => (
-              <li key={i.id} className="flex items-center justify-between gap-3 py-2.5 text-[14px]">
-                <span className="min-w-0">
-                  <span className="block truncate font-medium">{i.fileName}</span>
-                  <span className="text-[12.5px] text-muted">{i.from && i.to ? `${date(i.from)} – ${date(i.to)} · ` : ""}{i.rows} transactions</span>
-                </span>
-                {removing === i.id ? (
-                  <span className="flex shrink-0 gap-1.5">
-                    <button className="btn btn-danger btn-sm" onClick={() => { removeImport(i.id); setRemoving(null); flash(`Removed ${i.fileName}`); }}>Remove</button>
-                    <button className="btn btn-quiet btn-sm" onClick={() => setRemoving(null)}>Keep</button>
-                  </span>
-                ) : (
-                  <button className="btn btn-quiet btn-sm shrink-0" onClick={() => setRemoving(i.id)}>Remove</button>
-                )}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-[14px] text-muted">No statements added yet.</p>
-        )}
-        <Link href="/onboarding" className="btn btn-ghost mt-3">Add a statement</Link>
+      <Section title="Payment wallet" note="Where your rules and transfers run. Limits, per-transfer cap, access and revoke.">
+        <Link href="/payment-wallet" className="row -mx-1 rounded-[12px] px-1">
+          <span className="flex min-w-0 items-center gap-3"><span className="tile"><Icon name="wallet" size={17} /></span><span className="min-w-0"><span className="row-title">{state.autopilot?.wallet ? shortHash(state.autopilot.wallet, 4) : "Set up your payment wallet"}</span><span className="row-sub">{state.autopilot?.wallet ? accessText : "Face ID or fingerprint, no passwords"}</span></span></span>
+          <Icon name="chev" size={16} className="chev" />
+        </Link>
       </Section>
 
-      <Section title="Currency" note="Totals are shown in this currency.">
-        <div className="seg">
-          {[["NGN", "Naira (₦)"], ["USD", "US dollar ($)"]].map(([c, l]) => (
-            <button key={c} onClick={() => { updateSettings({ homeCurrency: c }); flash("Currency updated"); }} aria-pressed={state.settings.homeCurrency === c}>{l}</button>
-          ))}
-        </div>
+      <Section title="Saved recipients" note="The only addresses subscan can send to.">
+        <Link href="/transfers" className="row -mx-1 rounded-[12px] px-1">
+          <span className="flex min-w-0 items-center gap-3"><span className="tile"><Icon name="user" size={17} /></span><span className="min-w-0"><span className="row-title">{state.recipients.length} saved</span><span className="row-sub">Add or remove in Transfers</span></span></span>
+          <Icon name="chev" size={16} className="chev" />
+        </Link>
       </Section>
 
-      <Section title="Autopilot" note="Let subscan pay chosen bills automatically, within limits you set.">
-        <div className="flex flex-wrap items-center justify-between gap-3 text-[13.5px]">
-          <span>{state.autopilot?.sealedPolicy && !state.autopilot.revokedAt ? (state.autopilot.enabled ? "On" : "Paused") : "Off"}</span>
-          <Link href="/autopilot" className="btn btn-ghost">{state.autopilot?.sealedPolicy && !state.autopilot.revokedAt ? "Manage Autopilot" : "Set up Autopilot"}</Link>
-        </div>
-      </Section>
-
-      <Section title="Wallet" note="Only needed if you want to pay a bill from a digital wallet. subscan never holds your money.">
+      <Section title="Everyday wallet" note="MiniPay or MetaMask, for adding money and registering subscan's identity.">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="text-[13.5px]">
             <div className="flex items-center gap-2 font-medium">
-              <span className={`h-2 w-2 rounded-full ${w.address ? (w.onCelo ? "bg-accent" : "bg-alert") : "bg-line-strong"}`} />
+              <span className={`h-2 w-2 rounded-full ${w.address ? (w.onCelo ? "bg-positive" : "bg-alert") : "bg-line-strong"}`} />
               {w.address ? <span className="font-mono">{shortHash(w.address, 4)}</span> : "Not connected"}
             </div>
             {w.address && !w.onCelo && <div className="text-[12.5px] text-alert">Switch your wallet to the Celo network</div>}
           </div>
-          <Link href="/wallet" className="btn btn-ghost">Open wallet</Link>
+          <Link href="/wallet" className="btn btn-ghost">Open</Link>
         </div>
         <label className="mt-4 flex items-center gap-3 text-[13.5px]">
-          <button role="switch" aria-checked={state.settings.payGasInUsdt} onClick={() => { updateSettings({ payGasInUsdt: !state.settings.payGasInUsdt }); flash("Saved"); }} className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors ${state.settings.payGasInUsdt ? "border-accent bg-accent" : "rule bg-paper-2"}`}>
-            <span className={`absolute top-[3px] h-4 w-4 rounded-full bg-surface transition-all ${state.settings.payGasInUsdt ? "left-[22px]" : "left-[3px]"}`} />
+          <button role="switch" aria-checked={state.settings.payGasInUsdt} onClick={() => { updateSettings({ payGasInUsdt: !state.settings.payGasInUsdt }); flash("Saved"); }} className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${state.settings.payGasInUsdt ? "bg-accent" : "bg-line-strong"}`}>
+            <span className={`absolute top-[3px] h-[18px] w-[18px] rounded-full bg-surface transition-all ${state.settings.payGasInUsdt ? "left-[23px]" : "left-[3px]"}`} />
           </button>
-          <span>Pay the small network fee in digital dollars (USD₮) instead of CELO</span>
+          <span>Pay network fees from your everyday wallet in US dollars (USD₮) instead of CELO</span>
         </label>
       </Section>
 
       <Section title="Delete your data" note="Everything is stored in this browser only.">
         {!confirmReset ? (
-          <button className="btn btn-danger" onClick={() => setConfirmReset(true)}>Delete all my data</button>
+          <button className="btn btn-danger" onClick={() => setConfirmReset(true)}>Delete my rules and schedules</button>
         ) : (
-          <div className="rounded-[12px] border border-alert/30 bg-alert-wash px-3 py-3">
-            <p className="text-[13.5px]">This removes your statements, transactions and payments list from this device. Records of wallet payments you&rsquo;ve already made are kept.</p>
+          <div className="rounded-[12px] bg-alert-wash px-3 py-3">
+            <p className="text-[13.5px]">This removes your money rules, schedules and saved recipients from this browser. Your payment wallet, its money and the record of completed transactions stay.</p>
             <div className="mt-2.5 grid grid-cols-2 gap-2 sm:flex">
-              <button className="btn btn-danger" onClick={() => { reset(); setConfirmReset(false); flash("Your data was deleted"); }}>Yes, delete it</button>
+              <button className="btn btn-danger" onClick={() => { reset(); setConfirmReset(false); flash("Deleted"); }}>Yes, delete</button>
               <button className="btn btn-ghost" onClick={() => setConfirmReset(false)}>Cancel</button>
             </div>
           </div>
@@ -117,11 +89,12 @@ export default function Settings() {
         {tech && (
           <ul className="panel mt-2 px-4 text-[13.5px]">
             <Integration name="Celo mainnet (chain 42220)" ok={status?.celoRpc.ok} detail={status ? (status.celoRpc.ok ? `Connected · block ${status.celoRpc.block}` : "Unreachable") : undefined} />
-            <Integration name="Textile FX · USD₮ ↔ cNGN" ok={status?.textile.ok} detail={status ? (status.textile.ok ? `Live · 1 USD₮ ≈ ₦${status.textile.ngnPerUsd?.toFixed(2)}` : "Unreachable") : undefined} />
-            <Integration name="Agent" ok detail="Rule-based, runs inside subscan. No AI model." />
-            <Integration name="Altana wallet (Autopilot)" ok={status?.agent?.autopilot} detail={status ? (status.agent?.autopilot ? "Ready" : "AUTOPILOT_SEAL_KEY not set") : undefined} />
+            <Integration name="Textile FX · USD₮ ↔ cNGN" ok={status?.textile.ok} detail={status ? (status.textile.ok ? `Live · 1 USD₮ ≈ ${status.textile.ngnPerUsd?.toFixed(2)} cNGN` : "Unreachable") : undefined} />
+            <Integration name="Decisions" ok detail="Deterministic rules inside subscan. No AI model." />
+            <Integration name="Altana smart wallet + session" ok={status?.agent?.autopilot} detail={status ? (status.agent?.autopilot ? "Ready" : "AUTOPILOT_SEAL_KEY not set") : undefined} />
+            <Integration name="Scheduling" ok detail="Runs while subscan is open in a browser. No background server." />
             <Integration name="Storage" ok detail="This browser only, no server database" />
-            <Integration name="Transaction attribution (ERC-8021)" ok={status ? true : undefined} detail={status ? ATTRIBUTION_CODES.join(", ") : undefined} />
+            <Integration name="Transaction attribution (ERC-8021)" ok={status ? true : undefined} detail={status ? `${ATTRIBUTION_CODES.join(", ")} · Altana: altana,subscan,celo_e97672462153` : undefined} />
           </ul>
         )}
       </section>
@@ -141,8 +114,8 @@ function Section({ title, note, children }: { title: string; note: string; child
   );
 }
 
-function Integration({ name, ok, detail, warn }: { name: string; ok?: boolean; detail?: string; warn?: boolean }) {
-  const dot = ok === undefined ? "bg-paper-2" : ok ? "bg-accent" : warn ? "bg-amber" : "bg-alert";
+function Integration({ name, ok, detail }: { name: string; ok?: boolean; detail?: string }) {
+  const dot = ok === undefined ? "bg-paper-2" : ok ? "bg-positive" : "bg-alert";
   return (
     <li className="flex items-start justify-between gap-4 border-b rule-soft py-2.5 last:border-b-0">
       <span className="flex items-center gap-2.5"><span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} />{name}</span>

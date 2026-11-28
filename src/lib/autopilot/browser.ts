@@ -1,5 +1,5 @@
 "use client";
-// Autopilot in the browser: the user's side of the Altana wallet.
+// The payment wallet in the browser: the user's side of the Altana wallet.
 // The passkey (Face ID / Touch ID) is the wallet's admin and never leaves the
 // device. subscan's agent key is created on the server and only its public key
 // is shown here; the passkey grants that key a session with on-chain limits.
@@ -8,7 +8,6 @@ import { formatUnits, parseUnits, type Hex } from "viem";
 import { generatePrivateKey } from "viem/accounts";
 import { TOKENS, type TokenSymbol } from "../celo/config";
 import { erc20TransferData, sendTx, waitForReceipt } from "../celo/wallet";
-import type { AutopilotRecipient } from "../types";
 import { AUTOPILOT_APP_CODES, autopilotPermissions, type AutopilotLimits } from "./permissions";
 
 let altana: ReturnType<typeof createClient> | null = null;
@@ -18,8 +17,8 @@ function client() {
     appCode: AUTOPILOT_APP_CODES,
     // The wallet's own ERC-8004 identity, registered by the SDK after its first admin action.
     agentIdentity: {
-      name: "subscan Autopilot",
-      description: "Pays a person's recurring bills from their own Altana wallet, within the limits, recipients and expiry they granted.",
+      name: "subscan money autopilot",
+      description: "Runs a person's money rules and recurring transfers from their own Altana wallet: conversions through Textile FX and transfers to saved recipients, within the limits and expiry they granted.",
       endpoint: typeof window !== "undefined" ? `${window.location.origin}/api/erc8004` : undefined,
     },
   }));
@@ -43,7 +42,7 @@ export function passkeysSupported() {
 
 /** Create the user's Autopilot wallet. One passkey prompt. Nothing is sent on-chain yet. */
 export async function createAutopilotWallet() {
-  const w = await client().createPasskeyWallet({ name: "subscan Autopilot" });
+  const w = await client().createPasskeyWallet({ name: "subscan payment wallet" });
   const c = w.signer.credential;
   return { address: w.address as `0x${string}`, passkey: c.kind === "webauthn" ? { kind: "webauthn" as const, id: c.id, publicKey: c.publicKey, rpId: c.rpId } : undefined };
 }
@@ -79,7 +78,12 @@ export async function fund(from: `0x${string}`, to: `0x${string}`, token: TokenS
  * an expiry. Enforced by the wallet contract on Celo. Then the server confirms
  * the grant on-chain and seals the key with the approved recipients.
  */
-export async function grant(opts: { wallet: `0x${string}`; passkey?: Passkey; limits: AutopilotLimits; days: number; recipients: AutopilotRecipient[] }) {
+export interface ApprovedRecipient {
+  address: `0x${string}`;
+  label: string;
+}
+
+export async function grant(opts: { wallet: `0x${string}`; passkey?: Passkey; limits: AutopilotLimits; maxPerTransfer: Partial<AutopilotLimits>; days: number; recipients: ApprovedRecipient[] }) {
   const key = await api<{ publicKey: Hex; address: `0x${string}`; sealedKey: string }>({ action: "key", wallet: opts.wallet });
   const { wallet, signer } = await admin(opts.wallet, opts.passkey);
   if (wallet.address.toLowerCase() !== opts.wallet.toLowerCase()) throw new Error("That passkey belongs to a different Autopilot wallet.");
@@ -90,7 +94,7 @@ export async function grant(opts: { wallet: `0x${string}`; passkey?: Passkey; li
   if (result.status !== "granted") throw new Error(result.legs.find((l) => l.status === "FAILED")?.reason ?? "The wallet didn't authorise subscan.");
   const session = serializeSession(result);
   const tx = (result as { transactionHash?: Hex }).transactionHash ?? result.legs.find((l) => l.kind === "account")?.transactionHash;
-  const { sealedPolicy } = await api<{ sealedPolicy: string }>({ action: "activate", sealedKey: key.sealedKey, session, recipients: opts.recipients, limits: opts.limits });
+  const { sealedPolicy } = await api<{ sealedPolicy: string }>({ action: "activate", sealedKey: key.sealedKey, session, recipients: opts.recipients, limits: opts.limits, maxPerTransfer: opts.maxPerTransfer });
   return { sealedPolicy, expiry, agentPublicKey: key.publicKey, grantTx: tx };
 }
 
@@ -120,6 +124,9 @@ export interface AutopilotStatus {
   authorized: boolean;
   expiry: number;
   onchainExpiry: number;
+  recipients: ApprovedRecipient[];
+  maxPerTransfer: Partial<AutopilotLimits>;
+  templateVersion: number;
   balances: { USDT: string; cNGN: string };
   remaining: { USDT: string; cNGN: string };
 }
@@ -128,22 +135,28 @@ export function status(sealedPolicy: string, wallet: `0x${string}`) {
   return api<AutopilotStatus>({ action: "status", sealedPolicy, wallet });
 }
 
-export function updateRecipients(sealedPolicy: string, wallet: `0x${string}`, recipients: AutopilotRecipient[]) {
-  return api<{ sealedPolicy: string }>({ action: "recipients", sealedPolicy, wallet, recipients });
+/** Re-seal the saved recipients and per-transfer caps the server checks before signing. */
+export function updatePolicy(sealedPolicy: string, wallet: `0x${string}`, patch: { recipients?: ApprovedRecipient[]; maxPerTransfer?: Partial<AutopilotLimits> }) {
+  return api<{ sealedPolicy: string }>({ action: "policy", sealedPolicy, wallet, ...patch });
 }
 
-export interface PayResponse {
+export type ExecuteRequest =
+  | { kind: "transfer"; key: string; token: TokenSymbol; amountAtomic: string; recipient: `0x${string}` }
+  | { kind: "convert"; key: string; sellToken: TokenSymbol; buyToken: TokenSymbol; buyAmountAtomic?: string; sellAmountAtomic?: string; maxSellAtomic?: string };
+
+export interface ExecuteResponse {
   ok: boolean;
-  stage: "prepared" | "quoted" | "submitted" | "confirmed" | "failed";
+  status: "refused" | "processing" | "completed" | "failed";
   refusals?: string[];
   refusalText?: string[];
   transactionHash?: Hex;
-  source: TokenSymbol;
-  quote?: { rfqId: string; sell: string; buy: string; takerPays: string; feeAmount: string; rateRay: string; expiresAt: string };
+  quote?: { rfqId: string; sellToken: TokenSymbol; buyToken: TokenSymbol; sellAmount: string; buyAmount: string; takerPays: string; feeAmount: string; expiresAt: string };
   error?: string;
-  idempotencyKey: string;
+  key: string;
 }
 
-export function payNow(input: { sealedPolicy: string; wallet: `0x${string}`; enabled: boolean; alreadyPaid: boolean; request: { billId: string; billName: string; recipient: `0x${string}`; token: TokenSymbol; amountAtomic: string; dueDate: string } }) {
-  return api<PayResponse>({ action: "pay", ...input });
+export function execute(sealedPolicy: string, wallet: `0x${string}`, request: ExecuteRequest) {
+  return api<ExecuteResponse>({ action: "execute", sealedPolicy, wallet, request });
 }
+
+export { formatUnits, parseUnits };

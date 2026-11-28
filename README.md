@@ -1,18 +1,19 @@
 # subscan
 
-A rule-based personal bills agent on Celo mainnet. Import a statement → detect regular payments (deterministic) → see what you spend and what is coming up → let the agent pay chosen bills from your own Altana smart agentic wallet, within on-chain limits you grant, converting USD₮ ↔ cNGN on Textile FX when needed. No language model is involved.
+A personal money autopilot on Celo mainnet. People set **money rules** for their stablecoin balances (keep a minimum, convert when low, keep a share in dollars, cap automated transfers) and schedule **recurring transfers** to saved, confirmed recipients. Everything runs from the user's own Altana smart wallet under limits they grant; conversions go through Textile FX (USD₮ ↔ cNGN) at firm quotes. Decisions are deterministic rules. No language model is involved.
 
-Responsibilities: **subscan** (data, detection, scheduling, payment rules) · **Altana** (wallet, session permissions, execution, revocation) · **Textile FX** (stablecoin conversion).
+Responsibilities: **subscan** (rules, schedules, planning, checks, records) · **Altana** (wallet, session permissions, execution, revocation) · **Textile FX** (conversion).
 
 ## Architecture
 
-Three components, no database:
+No database:
 
-1. **Vercel** — hosts the Next.js app; server functions under `src/app/api/*` proxy Textile FX (keeping its key private), run the deterministic agent tools and Autopilot payments (Altana session key, sealed).
-2. **Textile FX** — live quotes and the actual USD₮ ↔ cNGN conversion on Celo.
-3. **Celo mainnet** — wallet connection, ERC-8004 agent identity, merchant settlement, verifiable transaction hashes. Every transaction carries an ERC-8021 attribution tag.
+1. **Vercel**: hosts the Next.js app. `src/app/api/autopilot` holds the sealed session key and runs every check before signing; `src/app/api/fx/*` proxies Textile FX.
+2. **Altana**: the user's passkey smart wallet. The session it grants subscan is limited on-chain to five calls (USD₮/cNGN approve and transfer, the Textile reactor), a monthly cap per token and an expiry, and can be revoked in one transaction.
+3. **Textile FX**: live rates (to size rules) and firm quotes (to execute).
+4. **Celo mainnet**: every transaction verified by receipt, tagged ERC-8021; ERC-8004 agent identity.
 
-Subscriptions, imported transactions, payment records and preferences live in the browser (`src/lib/db/storage.ts`). A server database can be added later by implementing the `StorageAdapter` interface.
+Rules, schedules, recipients and activity live in the browser (`src/lib/db`). **Automation runs only while subscan is open in a browser**: there is no background server or store, so nothing executes while it's closed. Transfers up to 3 days late are sent on the next open; older ones wait for the user's OK.
 
 ## Run
 
@@ -49,25 +50,10 @@ Secrets are stored as Vercel sensitive variables in production and preview, and 
 
 | Path | What |
 | --- | --- |
-| `src/lib/detection/` | CSV parsing, recurring-payment detection, spend/renewal/duplicate/waste analysis |
-| `src/lib/agent/` | Rule-based agent: `rules.ts` (decisions per bill), `tools.ts` (deterministic read-only tools) |
-| `src/lib/autopilot/` | Altana wallet, session template, sealed agent key, payment runner |
-| `src/lib/payments/engine.ts` | Payment stages and every autopay check |
-| `src/lib/celo/` | Central Celo config (verified addresses), browser wallet (viem, EIP-1193) |
-| `src/lib/textile/` | Textile FX v2 RFQ client, TakerControl proof signing |
-| `src/lib/merchant/` | x402 probe/pay (official `@x402/*` packages) |
-| `src/lib/payments/` | Payment planning and step-by-step execution |
-| `src/lib/db/` | Store + `StorageAdapter` (browser localStorage) |
-| `src/lib/celo/attribution.ts` | ERC-8021 attribution tagging and decoding |
-| `scripts/register-agent.ts` | ERC-8004 Identity Registry registration |
-
-## Verified integration constants (Celo, chain 42220)
-
-All checked against official docs and on chain on 2026-11-26 — see `src/lib/celo/config.ts`.
-
-- USD₮ `0x48065fbBE25f71C9282ddf5e1cD6D6A887483D5e` (6 dp) · cNGN `0xF6829D7393dAe24509eb1E52eE8e572e2E271a4f` (6 dp)
-- Textile FX LimitOrderReactor `0xa9AA0a64769cBed4d3B1Ceb4Df01CdE915C235b3`, API `https://api.textilecredit.com/v2`
-- ERC-8004 Identity Registry `0x8004A169FB4a3325136EB29fA0ceB6D2e539a432`
-- USD₮ fee-currency adapter `0x0E2A3e05bc9A16F5292A6170456A710cb89C6f72`
-
-Mocked/sample data is always labelled. The app never displays a transaction as confirmed without an on-chain receipt.
+| `src/lib/money/` | `rules.ts` (what a rule needs now), `schedule.ts` (dates), `plan.ts` (what's due), `runner.ts` (runs it, one tab at a time), `verify.ts` (receipt check), `actions.ts` (approve / retry / cancel), `policy.ts` (sync recipients + caps to the server) |
+| `src/lib/autopilot/` | Altana: session template, sealed key, server execution (transfer / convert), browser wallet + grant |
+| `src/lib/payments/engine.ts` | Every check a movement must pass (recipient, per-transfer cap, monthly cap, balance, expiry, route, duplicate) |
+| `src/lib/textile/` | Textile FX v2 RFQ client |
+| `src/lib/celo/` | Celo config (verified addresses), everyday wallet (EIP-1193), ERC-8021 tags |
+| `src/lib/db/` | Store, migration from older versions, storage adapter |
+| `scripts/autopilot-mainnet-test.ts` | Live mainnet test of the whole path |

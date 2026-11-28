@@ -1,8 +1,7 @@
 "use client";
 import Link from "next/link";
 import type { ReactNode } from "react";
-import type { PaymentStatus, Subscription } from "@/lib/types";
-import { level, LEVEL_LABEL } from "@/lib/review";
+import type { ActivityStatus } from "@/lib/types";
 
 /* Icons: 1.5px line icons drawn for subscan (24px grid). */
 const PATHS: Record<string, string> = {
@@ -39,6 +38,12 @@ const PATHS: Record<string, string> = {
   coins: "M12 8c4.4 0 8-1.3 8-3s-3.6-3-8-3-8 1.3-8 3 3.6 3 8 3Zm8-3v5c0 1.7-3.6 3-8 3s-8-1.3-8-3V5m16 5v5c0 1.7-3.6 3-8 3s-8-1.3-8-3v-5m16 5v4c0 1.7-3.6 3-8 3s-8-1.3-8-3v-4",
   in: "M17 7 7 17m0 0h8m-8 0V9",
   out: "M7 17 17 7m0 0H9m8 0v8",
+  rules: "M4 7h10m4 0h2M4 17h4m4 0h8M14 4v6m-6 4v6",
+  transfer: "M4 9h13l-3.5-3.5M20 15H7l3.5 3.5",
+  history: "M3 12a9 9 0 1 0 3-6.7M3 4v4h4m5-1v5l3 2",
+  user: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 9c.7-3.4 3.5-6 7-6s6.3 2.6 7 6",
+  pause: "M9 5v14m6-14v14",
+  trash: "M5 7h14m-9 0V5h4v2m-7 0 1 13h8l1-13",
 };
 
 export function Icon({ name, size = 18, className = "" }: { name: keyof typeof PATHS | string; size?: number; className?: string }) {
@@ -89,29 +94,23 @@ export function Avatar({ name, size = 32 }: { name: string; size?: number }) {
   );
 }
 
-export function BillStatus({ s }: { s: Subscription }) {
-  if (s.status === "dismissed") return <span className="pill">Dismissed</span>;
-  if (s.missed) return <span className="pill pill-red">Missed?</span>;
-  if (s.lapsed) return <span className="pill">Stopped</span>;
-  if (s.status === "detected") return <span className="pill pill-amber">Needs review</span>;
-  return <span className="pill pill-green">Active</span>;
-}
-
-const PAY: Record<PaymentStatus, [string, string]> = {
-  prepared: ["Draft", ""],
-  pending: ["Processing", "pill-blue"],
-  confirmed: ["Paid", "pill-green"],
+const STATUS: Record<ActivityStatus, [string, string]> = {
+  scheduled: ["Scheduled", "pill-blue"],
+  awaiting_approval: ["Needs your OK", "pill-amber"],
+  processing: ["Processing", "pill-blue"],
+  completed: ["Completed", "pill-green"],
   failed: ["Failed", "pill-red"],
+  cancelled: ["Cancelled", ""],
 };
-export function PayStatus({ status }: { status: PaymentStatus }) {
-  const [label, cls] = PAY[status];
+export function StatusPill({ status }: { status: ActivityStatus }) {
+  const [label, cls] = STATUS[status];
   return <span className={`pill ${cls}`}>{label}</span>;
 }
 
-/** Plain-language recurrence label, based on the evidence rather than a raw score. */
-export function RecurrenceText({ s }: { s: Subscription }) {
-  const lv = level(s);
-  return <span className={`text-[12px] ${lv === "likely" ? "text-accent" : lv === "possible" ? "text-ink-2" : "text-amber"}`}>{s.manual ? "Added by you" : LEVEL_LABEL[lv]}</span>;
+/** Token amount with its plain name: "5,000 cNGN", "20 USD₮". */
+export function Amount({ value, token, className = "" }: { value: string | number; token: "USDT" | "cNGN"; className?: string }) {
+  const n = Number(value);
+  return <span className={`num ${className}`}>{Number.isFinite(n) ? n.toLocaleString("en-US", { maximumFractionDigits: token === "USDT" ? 2 : 0, minimumFractionDigits: token === "USDT" && n % 1 ? 2 : 0 }) : "—"} {token === "USDT" ? "USD₮" : "cNGN"}</span>;
 }
 
 export function EmptyPanel({ icon = "doc", title, children, action }: { icon?: string; title: string; children?: ReactNode; action?: ReactNode }) {
@@ -135,10 +134,4 @@ export function SectionHead({ title, href, link, className = "" }: { title: Reac
   );
 }
 
-export function UploadButton({ label = "Add a statement", className = "btn btn-primary" }: { label?: string; className?: string }) {
-  return (
-    <Link href="/onboarding" className={className}>
-      {label}
-    </Link>
-  );
-}
+
